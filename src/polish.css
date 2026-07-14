@@ -9,4 +9,16 @@
 .product-main:focus-visible .product-photo { outline: 3px solid var(--brand-pink); outline-offset: 3px; }
 .toast, .admin-toast { box-shadow: 0 8px 24px rgb(63 36 24 / .18); }
 .empty { border: 1px dashed var(--line); border-radius: 16px; background: var(--brand-cream); }
+:where(button, .choice) { touch-action: manipulation; }
+@media (hover: hover) and (pointer: fine) {
+  .primary:hover { background: #d85a90; border-color: #d85a90; }
+  .secondary:hover { background: var(--brand-pink-light); }
+  .choice:hover { border-color: var(--brand-pink); }
+  .choice.active:hover { border-color: var(--brand-brown); }
+  .admin-tabs button:hover { color: var(--brand-brown); }
+  .quick-actions button:hover { border-color: var(--brand-pink); background: var(--brand-pink-light); }
+  .day-toggle:hover, .text-button:hover, .back:hover { color: var(--brand-pink); }
+  .switch:hover { opacity: .85; }
+  .cart-button:hover, .add-icon:hover { border-color: var(--brand-pink); }
+}
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
