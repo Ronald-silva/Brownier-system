@@ -7,3 +7,4 @@ data/brownies-fortal.demo.json
 .graphify/
 .vite-cache/
 .superpowers/
+.worktrees/
