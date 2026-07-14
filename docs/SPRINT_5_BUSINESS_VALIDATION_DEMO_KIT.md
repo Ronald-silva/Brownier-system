@@ -297,7 +297,7 @@ Encerrar o dia → revisar pedidos, receita bruta, esgotados e ajustes para aman
 3. **Métricas de funil não são capturadas automaticamente.** Conversão e abandono precisarão de instrumentação futura ou acompanhamento externo no piloto.
 4. **Dados são de demonstração em arquivo JSON.** Adequado para MVP/piloto controlado; antes de escalar, é necessário revisar persistência, backup, acesso e privacidade.
 5. **Adoção depende de disciplina operacional.** O sistema não corrige estoque se a equipe não marcar o sabor esgotado no momento certo.
-6. **Status “saiu para entrega” exige teste específico.** Há inconsistência de grafia entre a lista do painel e a validação do servidor (`SAIU_PARA_ENTREGA` versus `SAIU_PARA_ENTEGA` no fluxo visual). Não usar esse status na demo até validá-lo; usar “Pronto” ou “Concluído”.
+6. ~~Status "saiu para entrega" exige teste específico.~~ **Corrigido.** A inconsistência de grafia entre a lista do painel e a validação do servidor foi eliminada com uma fonte única de verdade (`src/lib/orderStatuses.ts`); o status pode ser usado normalmente na demo.
 7. **Promoções por produto podem ser difíceis de explicar.** Se a intenção for caixas mistas, a regra atual deve ser validada: ela é aplicada por sabor, não por total de brownies variados.
 
 ### Oportunidades de maior impacto, sem ampliar o escopo agora
