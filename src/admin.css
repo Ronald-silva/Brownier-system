@@ -1,0 +1,21 @@
+/* Painel no mesmo contêiner editorial das telas públicas. */
+.admin-login {
+  box-sizing: border-box;
+  width: min(1120px, 100%);
+  max-width: 1120px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 52px 12%;
+  background: var(--brand-cream);
+  align-items: flex-start;
+  justify-content: center;
+}
+.admin-login > * { width: min(470px, 100%); }
+.admin-login .back { width: auto; margin-bottom: 38px; }
+.admin-login .brand-logo { width: 250px; max-width: 70%; margin: 0 0 52px; align-self: center; }
+.admin-login h1 { max-width: 520px; }
+@media (max-width: 640px) {
+  .admin-login { padding: 30px 24px; }
+  .admin-login .back { margin-bottom: 28px; }
+  .admin-login .brand-logo { width: 190px; margin-bottom: 36px; }
+}

@@ -1,0 +1,12 @@
+/* Tokens comportamentais compartilhados: feedback suave, foco explícito e toque confiável. */
+:where(button, input, textarea, select) { transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+:where(button):not(:disabled):active { transform: translateY(1px); }
+:where(.primary, .secondary, .choice, .add-icon, .cart-button, .day-toggle) { min-height: 44px; }
+:where(input, textarea, select) { min-height: 44px; }
+.product-card { overflow: hidden; }
+.product-card:focus-within, .cart-line:focus-within, .op-product:focus-within, .promo-editor:focus-within { border-color: var(--brand-pink); box-shadow: 0 0 0 3px rgb(230 111 162 / .12); }
+.product-main:focus-visible { outline: none; }
+.product-main:focus-visible .product-photo { outline: 3px solid var(--brand-pink); outline-offset: 3px; }
+.toast, .admin-toast { box-shadow: 0 8px 24px rgb(63 36 24 / .18); }
+.empty { border: 1px dashed var(--line); border-radius: 16px; background: var(--brand-cream); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
