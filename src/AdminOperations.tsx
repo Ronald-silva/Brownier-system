@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { ORDER_STATUSES } from "./lib/orderStatuses";
 
 type Product = { id: string; name: string; description: string; basePrice: number; promotionalPrice: number | null; minimumPromotionalQuantity: number | null; isAvailable: boolean; isFeatured: boolean; isDay?: boolean; imageUrl: string };
 type Order = { id: string; publicCode: string; status: string; customerName: string; customerPhone: string; fulfillmentType: string; paymentMethod: string; total: number; createdAt: string; items: { productName: string; quantity: number }[]; customerNotes?: string };
 type Store = { business: Record<string, unknown>; products: Product[]; orders: Order[] };
 const money = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const statuses = ["NOVO", "CONFIRMADO", "EM_PREPARO", "PRONTO", "SAIU_PARA_ENTREGA", "CONCLUIDO", "CANCELADO"];
+const statuses = ORDER_STATUSES;
 
 export function AdminOperations({ onExit }: { onExit: () => void }) {
   const [code, setCode] = useState(sessionStorage.getItem("bf-admin") || ""); const [store, setStore] = useState<Store | null>(null); const [tab, setTab] = useState("dashboard"); const [feedback, setFeedback] = useState(""); const [search, setSearch] = useState(""); const headers = { "Content-Type": "application/json", "x-admin-code": code };

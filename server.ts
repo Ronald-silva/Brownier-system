@@ -4,6 +4,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createServer as createViteServer } from "vite";
 import { calculateLinePrice, type PricingProduct } from "./src/lib/pricing.ts";
+import { ORDER_STATUSES } from "./src/lib/orderStatuses.ts";
 
 type Product = PricingProduct & {
   id: string; slug: string; description: string; category: string; imageUrl: string;
@@ -17,7 +18,7 @@ type Store = {
 };
 
 const storePath = path.join(process.cwd(), "data", "brownies-fortal.demo.json");
-const orderStatuses = ["NOVO", "CONFIRMADO", "EM_PREPARO", "PRONTO", "SAIU_PARA_ENTEGA", "CONCLUIDO", "CANCELADO"];
+const orderStatuses = ORDER_STATUSES;
 const limitedRequests = new Map<string, { count: number; started: number }>();
 
 const demoStore: Store = {
