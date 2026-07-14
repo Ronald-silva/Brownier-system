@@ -77,7 +77,11 @@ function publicCode() { return `BF-${crypto.randomBytes(4).toString("hex").toUpp
 async function startServer() {
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "64kb" }));
+  app.use((req, res, next) => {
+    if (req.path === "/api/admin/products" || req.path.startsWith("/api/admin/products/")) return next();
+    express.json({ limit: "64kb" })(req, res, next);
+  });
+  const adminProductBody = express.json({ limit: "8mb" });
 
   app.get("/api/public/business", async (_req, res) => res.json((await loadStore()).business));
   app.get("/api/public/menu", async (_req, res) => {
@@ -123,13 +127,13 @@ async function startServer() {
   app.put("/api/admin/business", admin, async (req, res) => {
     const store = await loadStore(); store.business = { ...store.business, ...req.body, name: "Brownieria Fortal" }; await saveStore(store); res.json(store.business);
   });
-  app.post("/api/admin/products", admin, async (req, res) => {
+  app.post("/api/admin/products", admin, adminProductBody, async (req, res) => {
     const store = await loadStore(); const body = req.body ?? {};
     if (!validText(body.name, 100)) return res.status(400).json({ error: "Nome do produto é obrigatório." });
     const id = crypto.randomUUID(); const product: Product = { id, slug: String(body.slug || body.name).toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""), name: body.name.trim(), description: String(body.description || "").trim(), category: String(body.category || "Brownies").trim(), imageUrl: "", basePrice: Number(body.basePrice || 0), promotionalPrice: body.promotionalPrice === null || body.promotionalPrice === "" ? null : Number(body.promotionalPrice), minimumPromotionalQuantity: body.minimumPromotionalQuantity === null || body.minimumPromotionalQuantity === "" ? null : Number(body.minimumPromotionalQuantity), isActive: body.isActive !== false, isAvailable: body.isAvailable !== false, isFeatured: Boolean(body.isFeatured), displayOrder: Number(body.displayOrder || store.products.length + 1), ingredients: String(body.ingredients || ""), allergens: String(body.allergens || ""), updatedAt: new Date().toISOString() };
     store.products.push(product); await saveStore(store); res.status(201).json(product);
   });
-  app.put("/api/admin/products/:id", admin, async (req, res) => {
+  app.put("/api/admin/products/:id", admin, adminProductBody, async (req, res) => {
     const store = await loadStore(); const index = store.products.findIndex(p => p.id === req.params.id); if (index < 0) return res.status(404).json({ error: "Produto não encontrado." });
     const current = store.products[index]; const body = req.body ?? {}; const merged = { ...current, ...body, id: current.id, updatedAt: new Date().toISOString() } as Product;
     if (!validText(merged.name, 100) || !Number.isFinite(Number(merged.basePrice)) || Number(merged.basePrice) < 0) return res.status(400).json({ error: "Dados do produto inválidos." });
