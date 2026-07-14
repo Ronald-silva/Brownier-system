@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Outlet, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ArrowLeft, Check, ChevronRight, Clipboard, Minus, Plus, ShoppingBag } from "lucide-react";
 import { calculateLinePrice, type PricingProduct } from "./lib/pricing";
 import { productImageSrc } from "./lib/media";
 import { formatCurrency } from "./lib/format";
-import { AdminOperations } from "./AdminOperations";
 
 type Product = PricingProduct & { id: string; slug: string; name: string; description: string; category: string; imageUrl: string; isActive: boolean; isAvailable: boolean; isFeatured: boolean; isDay?: boolean; displayOrder: number; ingredients?: string; allergens?: string; updatedAt: string };
 type Business = { name: string; tagline: string; description: string; phone: string; whatsapp: string; address: string; hours: string; instagram: string; pickupEnabled: boolean; deliveryEnabled: boolean; paymentMethods: string[]; deliveryFee: number; receivedMessage: string; availabilityNotice: string; isDemo: boolean };
@@ -12,25 +12,41 @@ type Order = { id: string; publicCode: string; status: string; subtotal: number;
 async function api<T>(url: string, options?: RequestInit): Promise<T> { const response = await fetch(url, { headers: { "Content-Type": "application/json", ...(options?.headers || {}) }, ...options }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Não foi possível concluir a ação."); return data; }
 function BrandLogo({ compact = false }: { compact?: boolean }) { return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/brand/brownieria-fortal-logo.png" alt="Brownieria Fortal" />; }
 
+export type AppContext = { business: Business; products: Product[]; cart: CartLine[]; add: (p: Product, q?: number) => void; change: (id: string, q: number) => void; summary: { subtotal: number; discount: number } };
+
 export default function App() {
-  const [business, setBusiness] = useState<Business | null>(null); const [products, setProducts] = useState<Product[]>([]); const [cart, setCart] = useState<CartLine[]>([]);
-  const [screen, setScreen] = useState<"home" | "menu" | "product" | "cart" | "checkout" | "confirmed" | "admin">("home"); const [selected, setSelected] = useState<Product | null>(null); const [order, setOrder] = useState<Order | null>(null); const [notice, setNotice] = useState("");
+  const [business, setBusiness] = useState<Business | null>(null); const [products, setProducts] = useState<Product[]>([]); const [cart, setCart] = useState<CartLine[]>([]); const [notice, setNotice] = useState("");
+  const navigate = useNavigate();
   const refresh = async () => { const [b, p] = await Promise.all([api<Business>("/api/public/business"), api<Product[]>("/api/public/menu")]); setBusiness(b); setProducts(p); };
   useEffect(() => { refresh().catch(error => setNotice(error.message)); }, []);
   const add = (product: Product, quantity = 1) => { if (!product.isAvailable) return; setCart(lines => { const found = lines.find(line => line.product.id === product.id); return found ? lines.map(line => line.product.id === product.id ? { ...line, quantity: line.quantity + quantity } : line) : [...lines, { product, quantity }]; }); setNotice(`${product.name} adicionado ao pedido.`); };
   const change = (id: string, quantity: number) => setCart(lines => quantity < 1 ? lines.filter(line => line.product.id !== id) : lines.map(line => line.product.id === id ? { ...line, quantity } : line));
   const summary = useMemo(() => cart.reduce((acc, line) => { const price = calculateLinePrice(line.product, line.quantity); return { subtotal: acc.subtotal + price.total, discount: acc.discount + price.discount }; }, { subtotal: 0, discount: 0 }), [cart]);
   if (!business) return <main className="loading">Carregando cardápio…</main>;
-  if (screen === "admin") return <AdminOperations onExit={() => { setScreen("home"); refresh(); }} />;
-  return <main className="app-shell"><header className="public-header"><button className="brand" onClick={() => setScreen("home")} aria-label="Ir para o início"><BrandLogo compact /></button><button className="cart-button" onClick={() => setScreen("cart")} aria-label="Abrir pedido"><ShoppingBag size={19} aria-hidden="true" />{cart.length > 0 && <b>{cart.reduce((n, l) => n + l.quantity, 0)}</b>}</button></header>{notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice("")}>×</button></div>}
-    {screen === "home" && <Home business={business} products={products} onMenu={() => setScreen("menu")} onAdmin={() => setScreen("admin")} onProduct={p => { setSelected(p); setScreen("product"); }} onAdd={add} />}
-    {screen === "menu" && <Menu products={products} onBack={() => setScreen("home")} onProduct={p => { setSelected(p); setScreen("product"); }} onAdd={add} />}
-    {screen === "product" && selected && <ProductDetail product={selected} recommendations={products.filter(p => p.isFeatured && p.id !== selected.id && p.isAvailable).slice(0, 2)} onBack={() => setScreen("menu")} onAdd={add} />}
-    {screen === "cart" && <Cart lines={cart} subtotal={summary.subtotal} discount={summary.discount} onBack={() => setScreen("menu")} onChange={change} onCheckout={() => setScreen("checkout")} />}
-    {screen === "checkout" && <Checkout business={business} lines={cart} summary={summary} onBack={() => setScreen("cart")} onDone={created => { setOrder(created); setCart([]); setScreen("confirmed"); }} />}
-    {screen === "confirmed" && order && <Confirmation order={order} message={business.receivedMessage} onMenu={() => setScreen("menu")} />}
-  </main>;
+  const context: AppContext = { business, products, cart, add, change, summary };
+  return <main className="app-shell"><header className="public-header"><button className="brand" onClick={() => navigate("/")} aria-label="Ir para o início"><BrandLogo compact /></button><button className="cart-button" onClick={() => navigate("/carrinho")} aria-label="Abrir pedido"><ShoppingBag size={19} aria-hidden="true" />{cart.length > 0 && <b>{cart.reduce((n, l) => n + l.quantity, 0)}</b>}</button></header>{notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice("")}>×</button></div>}<Outlet context={context} /></main>;
 }
+
+function HomeRoute() {
+  const { business, products, add } = useOutletContext<AppContext>();
+  const navigate = useNavigate();
+  return <Home business={business} products={products} onMenu={() => navigate("/cardapio")} onAdmin={() => navigate("/equipe")} onProduct={p => navigate(`/cardapio/${p.slug}`)} onAdd={add} />;
+}
+function MenuRoute() {
+  const { products, add } = useOutletContext<AppContext>();
+  const navigate = useNavigate();
+  return <Menu products={products} onBack={() => navigate("/")} onProduct={p => navigate(`/cardapio/${p.slug}`)} onAdd={add} />;
+}
+function ProductRoute() {
+  const { products, add } = useOutletContext<AppContext>();
+  const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
+  const product = products.find(p => p.slug === slug);
+  if (!product) return <main className="loading">Produto não encontrado.</main>;
+  const recommendations = products.filter(p => p.isFeatured && p.id !== product.id && p.isAvailable).slice(0, 2);
+  return <ProductDetail product={product} recommendations={recommendations} onBack={() => navigate("/cardapio")} onAdd={(p, q) => { add(p, q); navigate("/carrinho"); }} />;
+}
+export { HomeRoute, MenuRoute, ProductRoute };
 
 function Home({ products, onMenu, onAdmin, onProduct, onAdd }: { business: Business; products: Product[]; onMenu: () => void; onAdmin: () => void; onProduct: (p: Product) => void; onAdd: (p: Product) => void }) { const day = products.find(p => p.slug === "brigadeiro") || products[0]; return <><section className="hero"><div><p className="eyebrow">PREPARADOS ARTESANALMENTE HOJE</p><h1>O brownie que conquista na primeira mordida.</h1><p>Feitos em pequenos lotes para garantir casquinha, recheio e muito chocolate de verdade.</p><div className="hero-actions"><button className="primary" onClick={onMenu}>Escolher meus brownies <ChevronRight size={18} aria-hidden="true" /></button><button className="secondary" onClick={onMenu}>Ver cardápio</button></div></div><figure className="hero-photo"><img src={productImageSrc(day ?? {})} alt="Foto demonstrativa de brownie de chocolate com recheio cremoso" /><figcaption>Imagem demonstrativa — aguardando foto oficial</figcaption></figure></section><section className="day-feature"><p>🍫 BROWNIE DO DIA</p><h2>Hoje o destaque é {day?.name}</h2><span>Produzido nesta manhã · quantidade limitada</span><button onClick={() => day && onProduct(day)}>Conhecer o sabor</button></section><section className="section story"><p className="eyebrow">A NOSSA RECEITA DE TODO DIA</p><h2>Chocolate de verdade. Feito com carinho.</h2><p>Ingredientes selecionados, produção diária e aquela pausa gostosa que melhora o dia inteiro.</p></section><section className="section"><div className="section-title"><div><p className="eyebrow">MAIS PEDIDOS HOJE</p><h2>Quem experimenta volta.</h2></div><button className="text-button" onClick={onMenu}>Ver todos</button></div><div className="product-grid">{products.filter(p => p.isFeatured).slice(0, 3).map(p => <ProductCard key={p.id} product={p} onClick={() => onProduct(p)} onAdd={() => onAdd(p)} />)}</div></section><section className="collections"><p className="eyebrow">PARA CADA VONTADE</p><h2>Uma caixa para dividir. Ou não.</h2><p>Em breve, monte combinações para presentear, compartilhar ou guardar só para você.</p><button className="secondary" onClick={onMenu}>Explorar sabores</button></section><section className="social-proof"><strong>Feitos em pequenos lotes, todos os dias.</strong><span>Números e avaliações reais serão exibidos aqui após validação da Brownieria.</span></section><section className="how"><p className="eyebrow">É MUITO SIMPLES ❤️</p><h2>Seu momento doce está a poucos passos.</h2><ol className="how-steps"><li>Escolha seus brownies.</li><li>Monte seu pedido.</li><li>Receba fresquinho.</li></ol></section><footer><span>Brownieria&nbsp;Fortal <em>• demonstração</em></span><button onClick={onAdmin}>Área da equipe</button></footer></> }
 function Menu({ products, onBack, onProduct, onAdd }: { products: Product[]; onBack: () => void; onProduct: (p: Product) => void; onAdd: (p: Product) => void }) { const ordered = [...products].sort((a,b) => Number(b.slug === "brigadeiro") - Number(a.slug === "brigadeiro") || Number(b.isFeatured) - Number(a.isFeatured) || Number(b.isAvailable) - Number(a.isAvailable) || a.displayOrder - b.displayOrder); return <section className="section page menu-page"><Back onClick={onBack} /><p className="eyebrow">CARDÁPIO ATUALIZADO</p><h1>Escolha seu momento doce.</h1><p className="subtle">Produzidos em pequenos lotes. Sabores disponíveis aparecem primeiro.</p><h2 className="sr-only">Sabores disponíveis</h2><div className="product-grid menu-grid">{ordered.map(p => <ProductCard key={p.id} product={p} isDay={p.slug === "brigadeiro"} onClick={() => onProduct(p)} onAdd={() => onAdd(p)} />)}</div></section> }
