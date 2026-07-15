@@ -46,6 +46,8 @@ Um `ProductEditor` adicional (modo criação, `product={null}`) fica no topo da 
 
 ## Fluxo de dados
 
+> **Nota pós-implementação (2026-07-15):** a conversão reais↔centavos (`Math.round(Number(valor) * 100)` / `/100`) descrita abaixo estava incorreta e foi removida durante a implementação. `basePrice`/`promotionalPrice` são armazenados como reais inteiros em todo o app (confirmado via `tests/format.test.ts` e o seed de `server.ts`), então nem a criação nem a edição de sabor fazem qualquer conversão de escala — os valores trafegam como reais inteiros de ponta a ponta. Não restaurar essa conversão ao seguir os detalhes abaixo.
+
 - **Criar:** `POST /api/admin/products` com `{ name, category, basePrice, description, ingredients, allergens }` (preço convertido de reais para centavos: `Math.round(Number(valor) * 100)`, mesma conversão já usada em Promoções). Sucesso → recarrega a lista (`load()`), fecha o formulário, mostra toast "Sabor criado.".
 - **Editar:** `PUT /api/admin/products/:id`, reaproveitando a função `product()` já existente (`fetch` + patch), passando os mesmos campos do formulário como patch.
 - **Excluir:** `DELETE /api/admin/products/:id` (nova função `deleteProduct(item)` em `AdminOperations`). Sucesso → recarrega a lista, mostra toast "Sabor removido.".

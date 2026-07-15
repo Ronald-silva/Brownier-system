@@ -21,6 +21,8 @@
 
 ---
 
+> **Nota pós-implementação (2026-07-15):** durante a Task 2, foi descoberto que `basePrice`/`promotionalPrice` são armazenados como reais inteiros em todo o app (não centavos) — confirmado via `tests/format.test.ts` e o seed de `server.ts`. A conversão `/100`/`*100` mostrada nos snippets de código abaixo (copiada da aba Promoções, que já tinha o mesmo problema) **estava incorreta** e foi removida tanto no editor novo quanto na aba Promoções existente. O código realmente enviado para produção NÃO faz nenhuma conversão — os valores são reais inteiros de ponta a ponta. Não restaurar a conversão por 100 ao consultar os snippets históricos abaixo.
+
 ## File Structure
 
 | Arquivo | Ação | Responsabilidade |

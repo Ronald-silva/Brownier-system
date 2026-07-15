@@ -74,7 +74,7 @@ function ProductEditor({ product, onSave, onCancel, onDelete }: { product: Produ
     <label>Ingredientes<input value={ingredients} onChange={e => setIngredients(e.target.value)} /></label>
     <label>Alergênicos<input value={allergens} onChange={e => setAllergens(e.target.value)} /></label>
     <div className="choice-row">
-      <button type="button" className="secondary" onClick={onCancel}>Cancelar</button>
+      <button type="button" className="secondary" onClick={e => { onCancel(); e.currentTarget.closest("details")?.removeAttribute("open"); }}>Cancelar</button>
       <button className="primary">{product ? "Salvar sabor" : "Criar sabor"}</button>
     </div>
     {onDelete && (confirmingDelete
