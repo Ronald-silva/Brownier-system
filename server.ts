@@ -5,6 +5,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { createServer as createViteServer } from "vite";
 import { calculateLinePrice, type PricingProduct } from "./src/lib/pricing.ts";
 import { ORDER_STATUSES } from "./src/lib/orderStatuses.ts";
+import { sanitizeOptionalText } from "./src/lib/sanitize.ts";
 
 type Product = PricingProduct & {
   id: string; slug: string; description: string; category: string; imageUrl: string;
@@ -104,7 +105,7 @@ async function startServer() {
     res.json(safe);
   });
   app.post("/api/public/orders", publicRateLimit, async (req, res) => {
-    const { items, customerName, customerPhone, fulfillmentType, deliveryAddress = "", reference = "", customerNotes = "", paymentMethod, changeFor } = req.body ?? {};
+    const { items, customerName, customerPhone, fulfillmentType, deliveryAddress, reference, customerNotes, paymentMethod, changeFor } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0 || items.length > 30) return res.status(400).json({ error: "O pedido precisa ter pelo menos um item." });
     if (!validText(customerName, 100) || !validText(customerPhone, 30)) return res.status(400).json({ error: "Informe nome e telefone." });
     if (!["RETIRADA", "ENTREGA"].includes(fulfillmentType) || !["PIX", "DINHEIRO", "A_COMBINAR"].includes(paymentMethod)) return res.status(400).json({ error: "Recebimento ou pagamento inválido." });
@@ -119,7 +120,7 @@ async function startServer() {
       orderItems.push({ productId: product.id, productName: product.name, unitPrice: price.unitPrice, quantity, totalPrice: price.total });
     }
     const deliveryFee = fulfillmentType === "ENTREGA" ? Number(business.deliveryFee || 0) : 0;
-    const order = { id: crypto.randomUUID(), publicCode: publicCode(), status: "NOVO", fulfillmentType, paymentMethod, subtotal, discount, deliveryFee, total: subtotal + deliveryFee, customerName: customerName.trim(), customerPhone: customerPhone.trim(), deliveryAddress: deliveryAddress.trim(), reference: reference.trim(), customerNotes: customerNotes.trim(), internalNotes: "", changeFor: typeof changeFor === "string" ? changeFor.trim() : "", items: orderItems, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const order = { id: crypto.randomUUID(), publicCode: publicCode(), status: "NOVO", fulfillmentType, paymentMethod, subtotal, discount, deliveryFee, total: subtotal + deliveryFee, customerName: customerName.trim(), customerPhone: customerPhone.trim(), deliveryAddress: sanitizeOptionalText(deliveryAddress), reference: sanitizeOptionalText(reference), customerNotes: sanitizeOptionalText(customerNotes), internalNotes: "", changeFor: sanitizeOptionalText(changeFor), items: orderItems, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     store.orders.unshift(order); await saveStore(store); res.status(201).json(order);
   });
 
