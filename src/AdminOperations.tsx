@@ -14,7 +14,11 @@ export function AdminOperations({ onExit }: { onExit: () => void }) {
   const product = async (item: Product, patch: Partial<Product>, message: string) => { const r = await fetch(`/api/admin/products/${item.id}`, { method: "PUT", headers, body: JSON.stringify({ ...item, ...patch }) }); if (!r.ok) return notify("Não foi possível salvar. Tente de novo."); await load(); notify(message); };
   const order = async (item: Order, status: string) => { const r = await fetch(`/api/admin/orders/${item.id}`, { method: "PUT", headers, body: JSON.stringify({ status }) }); if (!r.ok) return notify("Não foi possível atualizar o pedido."); await load(); notify("Pedido atualizado."); };
   const uploadPhoto = (item: Product, file?: File) => { if (!file) return; if (!file.type.startsWith("image/")) return notify("Escolha uma imagem válida."); const reader = new FileReader(); reader.onload = () => product(item, { imageUrl: String(reader.result) }, "Foto atualizada."); reader.readAsDataURL(file); };
-  const deleteProduct = (_item: Product) => notify("Excluir ainda não disponível.");
+  const deleteProduct = async (item: Product) => {
+    const r = await fetch(`/api/admin/products/${item.id}`, { method: "DELETE", headers });
+    if (!r.ok) return notify("Não foi possível excluir o sabor. Tente de novo.");
+    await load(); notify("Sabor removido.");
+  };
   const createProduct = async (fields: ProductFormFields) => {
     const r = await fetch("/api/admin/products", { method: "POST", headers, body: JSON.stringify(fields) });
     if (!r.ok) return notify("Não foi possível criar o sabor. Tente de novo.");
