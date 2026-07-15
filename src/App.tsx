@@ -44,7 +44,7 @@ function ProductRoute() {
   const product = products.find(p => p.slug === slug);
   if (!product) return <main className="loading">Produto não encontrado.</main>;
   const recommendations = products.filter(p => p.isFeatured && p.id !== product.id && p.isAvailable).slice(0, 2);
-  return <ProductDetail product={product} recommendations={recommendations} onBack={() => navigate("/cardapio")} onAdd={(p, q) => { add(p, q); navigate("/carrinho"); }} />;
+  return <ProductDetail product={product} recommendations={recommendations} onBack={() => navigate("/cardapio")} onAdd={add} />;
 }
 export { HomeRoute, MenuRoute, ProductRoute };
 
