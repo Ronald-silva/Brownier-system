@@ -1,7 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {BrowserRouter, Routes, Route} from 'react-router-dom';
-import App, {HomeRoute, MenuRoute, ProductRoute} from './App.tsx';
+import App, {HomeRoute, MenuRoute, ProductRoute, CartRoute, CheckoutRoute} from './App.tsx';
 import './index.css';
 import './experience.css';
 import './admin.css';
@@ -16,6 +16,8 @@ createRoot(document.getElementById('root')!).render(
           <Route index element={<HomeRoute />} />
           <Route path="cardapio" element={<MenuRoute />} />
           <Route path="cardapio/:slug" element={<ProductRoute />} />
+          <Route path="carrinho" element={<CartRoute />} />
+          <Route path="finalizar" element={<CheckoutRoute />} />
         </Route>
       </Routes>
     </BrowserRouter>
