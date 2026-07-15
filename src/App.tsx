@@ -20,7 +20,7 @@ export default function App() {
   const navigate = useNavigate();
   const refresh = async () => { const [b, p] = await Promise.all([api<Business>("/api/public/business"), api<Product[]>("/api/public/menu")]); setBusiness(b); setProducts(p); };
   useEffect(() => { refresh().catch(error => setNotice(error.message)); }, []);
-  useEffect(() => { sessionStorage.setItem("bf-cart", JSON.stringify(cart)); }, [cart]);
+  useEffect(() => { try { sessionStorage.setItem("bf-cart", JSON.stringify(cart)); } catch { /* ignore storage failures (quota exceeded, private browsing) — cart still works in-memory for this session */ } }, [cart]);
   const add = (product: Product, quantity = 1) => { if (!product.isAvailable) return; setCart(lines => { const found = lines.find(line => line.product.id === product.id); return found ? lines.map(line => line.product.id === product.id ? { ...line, quantity: line.quantity + quantity } : line) : [...lines, { product, quantity }]; }); setNotice(`${product.name} adicionado ao pedido.`); };
   const change = (id: string, quantity: number) => setCart(lines => quantity < 1 ? lines.filter(line => line.product.id !== id) : lines.map(line => line.product.id === id ? { ...line, quantity } : line));
   const clearCart = () => setCart([]);
