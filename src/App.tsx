@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Outlet, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ArrowLeft, Check, ChevronRight, Clipboard, Minus, Plus, ShoppingBag } from "lucide-react";
 import { calculateLinePrice, type PricingProduct } from "./lib/pricing";
 import { productImageSrc } from "./lib/media";
@@ -57,7 +57,23 @@ function CheckoutRoute() {
   const navigate = useNavigate();
   return <Checkout business={business} lines={cart} summary={summary} onBack={() => navigate("/carrinho")} onDone={order => { clearCart(); navigate(`/pedido/${order.publicCode}`, { state: { order } }); }} />;
 }
-export { HomeRoute, MenuRoute, ProductRoute, CartRoute, CheckoutRoute };
+function ConfirmationRoute() {
+  const { business } = useOutletContext<AppContext>();
+  const { publicCode } = useParams<{ publicCode: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const stateOrder = (location.state as { order?: Order } | null)?.order;
+  const [order, setOrderState] = useState<Order | null>(stateOrder ?? null);
+  const [notFound, setNotFound] = useState(false);
+  useEffect(() => {
+    if (stateOrder || !publicCode) return;
+    api<Order>(`/api/public/orders/${publicCode}`).then(setOrderState).catch(() => setNotFound(true));
+  }, [stateOrder, publicCode]);
+  if (notFound) return <main className="loading">Pedido não encontrado.</main>;
+  if (!order) return <main className="loading">Carregando pedido…</main>;
+  return <Confirmation order={order} message={business.receivedMessage} onMenu={() => navigate("/cardapio")} />;
+}
+export { HomeRoute, MenuRoute, ProductRoute, CartRoute, CheckoutRoute, ConfirmationRoute };
 
 function Home({ products, onMenu, onAdmin, onProduct, onAdd }: { business: Business; products: Product[]; onMenu: () => void; onAdmin: () => void; onProduct: (p: Product) => void; onAdd: (p: Product) => void }) { const day = products.find(p => p.slug === "brigadeiro") || products[0]; return <><section className="hero"><div><p className="eyebrow">PREPARADOS ARTESANALMENTE HOJE</p><h1>O brownie que conquista na primeira mordida.</h1><p>Feitos em pequenos lotes para garantir casquinha, recheio e muito chocolate de verdade.</p><div className="hero-actions"><button className="primary" onClick={onMenu}>Escolher meus brownies <ChevronRight size={18} aria-hidden="true" /></button><button className="secondary" onClick={onMenu}>Ver cardápio</button></div></div><figure className="hero-photo"><img src={productImageSrc(day ?? {})} alt="Foto demonstrativa de brownie de chocolate com recheio cremoso" /><figcaption>Imagem demonstrativa — aguardando foto oficial</figcaption></figure></section><section className="day-feature"><p>🍫 BROWNIE DO DIA</p><h2>Hoje o destaque é {day?.name}</h2><span>Produzido nesta manhã · quantidade limitada</span><button onClick={() => day && onProduct(day)}>Conhecer o sabor</button></section><section className="section story"><p className="eyebrow">A NOSSA RECEITA DE TODO DIA</p><h2>Chocolate de verdade. Feito com carinho.</h2><p>Ingredientes selecionados, produção diária e aquela pausa gostosa que melhora o dia inteiro.</p></section><section className="section"><div className="section-title"><div><p className="eyebrow">MAIS PEDIDOS HOJE</p><h2>Quem experimenta volta.</h2></div><button className="text-button" onClick={onMenu}>Ver todos</button></div><div className="product-grid">{products.filter(p => p.isFeatured).slice(0, 3).map(p => <ProductCard key={p.id} product={p} onClick={() => onProduct(p)} onAdd={() => onAdd(p)} />)}</div></section><section className="collections"><p className="eyebrow">PARA CADA VONTADE</p><h2>Uma caixa para dividir. Ou não.</h2><p>Em breve, monte combinações para presentear, compartilhar ou guardar só para você.</p><button className="secondary" onClick={onMenu}>Explorar sabores</button></section><section className="social-proof"><strong>Feitos em pequenos lotes, todos os dias.</strong><span>Números e avaliações reais serão exibidos aqui após validação da Brownieria.</span></section><section className="how"><p className="eyebrow">É MUITO SIMPLES ❤️</p><h2>Seu momento doce está a poucos passos.</h2><ol className="how-steps"><li>Escolha seus brownies.</li><li>Monte seu pedido.</li><li>Receba fresquinho.</li></ol></section><footer><span>Brownieria&nbsp;Fortal <em>• demonstração</em></span><button onClick={onAdmin}>Área da equipe</button></footer></> }
 function Menu({ products, onBack, onProduct, onAdd }: { products: Product[]; onBack: () => void; onProduct: (p: Product) => void; onAdd: (p: Product) => void }) { const ordered = [...products].sort((a,b) => Number(b.slug === "brigadeiro") - Number(a.slug === "brigadeiro") || Number(b.isFeatured) - Number(a.isFeatured) || Number(b.isAvailable) - Number(a.isAvailable) || a.displayOrder - b.displayOrder); return <section className="section page menu-page"><Back onClick={onBack} /><p className="eyebrow">CARDÁPIO ATUALIZADO</p><h1>Escolha seu momento doce.</h1><p className="subtle">Produzidos em pequenos lotes. Sabores disponíveis aparecem primeiro.</p><h2 className="sr-only">Sabores disponíveis</h2><div className="product-grid menu-grid">{ordered.map(p => <ProductCard key={p.id} product={p} isDay={p.slug === "brigadeiro"} onClick={() => onProduct(p)} onAdd={() => onAdd(p)} />)}</div></section> }
