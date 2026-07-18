@@ -298,7 +298,7 @@ Encerrar o dia → revisar pedidos, receita bruta, esgotados e ajustes para aman
 4. **Dados são de demonstração em arquivo JSON.** Adequado para MVP/piloto controlado; antes de escalar, é necessário revisar persistência, backup, acesso e privacidade.
 5. **Adoção depende de disciplina operacional.** O sistema não corrige estoque se a equipe não marcar o sabor esgotado no momento certo.
 6. ~~Status "saiu para entrega" exige teste específico.~~ **Corrigido.** A inconsistência de grafia entre a lista do painel e a validação do servidor foi eliminada com uma fonte única de verdade (`src/lib/orderStatuses.ts`); o status pode ser usado normalmente na demo.
-7. **Promoções por produto podem ser difíceis de explicar.** Se a intenção for caixas mistas, a regra atual deve ser validada: ela é aplicada por sabor, não por total de brownies variados.
+7. ~~Promoções por produto podem ser difíceis de explicar.~~ **Corrigido.** A regra agora é por total de unidades do pedido, somando todos os sabores — não mais por sabor isolado. Confirmado com o dono do negócio (Mateus): caixas mistas contam normalmente para o desconto.
 
 ### Oportunidades de maior impacto, sem ampliar o escopo agora
 
