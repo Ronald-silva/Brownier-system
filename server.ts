@@ -113,10 +113,11 @@ async function startServer() {
     if (fulfillmentType === "ENTREGA" && (!business.deliveryEnabled || !validText(deliveryAddress, 300))) return res.status(400).json({ error: "Informe o endereço de entrega." });
     if (fulfillmentType === "RETIRADA" && !business.pickupEnabled) return res.status(400).json({ error: "Retirada indisponível no momento." });
     const orderItems = [] as Array<Record<string, unknown>>; let subtotal = 0; let discount = 0;
+    const totalQuantity = items.reduce((sum: number, item: any) => sum + Number(item?.quantity || 0), 0);
     for (const item of items) {
       const quantity = Number(item?.quantity); const product = store.products.find(p => p.id === item?.productId && p.isActive && p.isAvailable);
       if (!product || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) return res.status(400).json({ error: "Há um produto indisponível ou uma quantidade inválida." });
-      const price = calculateLinePrice(product, quantity); subtotal += price.total; discount += price.discount;
+      const price = calculateLinePrice(product, quantity, totalQuantity); subtotal += price.total; discount += price.discount;
       orderItems.push({ productId: product.id, productName: product.name, unitPrice: price.unitPrice, quantity, totalPrice: price.total });
     }
     const deliveryFee = fulfillmentType === "ENTREGA" ? Number(business.deliveryFee || 0) : 0;
