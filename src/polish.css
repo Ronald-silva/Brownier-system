@@ -22,3 +22,8 @@
   .cart-button:hover, .add-icon:hover { border-color: var(--brand-pink); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+@keyframes cart-count-pop { 0% { transform: scale(.6); opacity: .5; } 60% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
+.cart-button b { animation: cart-count-pop .28s ease; }
+.add-icon.added { background: var(--brand-pink); border-color: var(--brand-pink); color: #fff; }
+@keyframes added-toast-in { 0% { transform: translate(-50%, 8px); opacity: 0; } 100% { transform: translate(-50%, 0); opacity: 1; } }
+.added-toast { position: fixed; z-index: 6; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--brand-brown-dark); color: #fff; border-radius: 999px; padding: 10px 16px; font-size: 12px; font-weight: 800; box-shadow: 0 8px 24px rgb(63 36 24 / .18); pointer-events: none; animation: added-toast-in .22s ease; }

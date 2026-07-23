@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ArrowLeft, Check, ChevronRight, Clipboard, Minus, Plus, ShoppingBag } from "lucide-react";
 import { calculateLinePrice, type PricingProduct } from "./lib/pricing";
@@ -16,18 +16,20 @@ function BrandLogo({ compact = false }: { compact?: boolean }) { return <img cla
 export type AppContext = { business: Business; products: Product[]; cart: CartLine[]; add: (p: Product, q?: number) => void; change: (id: string, q: number) => void; clearCart: () => void; summary: { subtotal: number; discount: number } };
 
 export default function App() {
-  const [business, setBusiness] = useState<Business | null>(null); const [products, setProducts] = useState<Product[]>([]); const [cart, setCart] = useState<CartLine[]>(() => { try { const raw = sessionStorage.getItem("bf-cart"); return raw ? JSON.parse(raw) : []; } catch { return []; } }); const [notice, setNotice] = useState("");
+  const [business, setBusiness] = useState<Business | null>(null); const [products, setProducts] = useState<Product[]>([]); const [cart, setCart] = useState<CartLine[]>(() => { try { const raw = sessionStorage.getItem("bf-cart"); return raw ? JSON.parse(raw) : []; } catch { return []; } }); const [notice, setNotice] = useState(""); const [addedNotice, setAddedNotice] = useState<{ id: number; text: string } | null>(null);
+  const addedNoticeId = useRef(0);
   const navigate = useNavigate();
   const refresh = async () => { const [b, p] = await Promise.all([api<Business>("/api/public/business"), api<Product[]>("/api/public/menu")]); setBusiness(b); setProducts(p); };
   useEffect(() => { refresh().catch(error => setNotice(error.message)); }, []);
   useEffect(() => { try { sessionStorage.setItem("bf-cart", JSON.stringify(cart)); } catch { /* ignore storage failures (quota exceeded, private browsing) — cart still works in-memory for this session */ } }, [cart]);
-  const add = (product: Product, quantity = 1) => { if (!product.isAvailable) return; setCart(lines => { const found = lines.find(line => line.product.id === product.id); return found ? lines.map(line => line.product.id === product.id ? { ...line, quantity: line.quantity + quantity } : line) : [...lines, { product, quantity }]; }); setNotice(`${product.name} adicionado ao pedido.`); };
+  useEffect(() => { if (!addedNotice) return; const timer = setTimeout(() => setAddedNotice(null), 2600); return () => clearTimeout(timer); }, [addedNotice]);
+  const add = (product: Product, quantity = 1) => { if (!product.isAvailable) return; setCart(lines => { const found = lines.find(line => line.product.id === product.id); return found ? lines.map(line => line.product.id === product.id ? { ...line, quantity: line.quantity + quantity } : line) : [...lines, { product, quantity }]; }); addedNoticeId.current += 1; setAddedNotice({ id: addedNoticeId.current, text: `✓ ${product.name} adicionado ao pedido` }); };
   const change = (id: string, quantity: number) => setCart(lines => quantity < 1 ? lines.filter(line => line.product.id !== id) : lines.map(line => line.product.id === id ? { ...line, quantity } : line));
   const clearCart = () => setCart([]);
   const summary = useMemo(() => { const totalQuantity = cart.reduce((sum, line) => sum + line.quantity, 0); return cart.reduce((acc, line) => { const price = calculateLinePrice(line.product, line.quantity, totalQuantity); return { subtotal: acc.subtotal + price.total, discount: acc.discount + price.discount }; }, { subtotal: 0, discount: 0 }); }, [cart]);
   if (!business) return <main className="loading">Carregando cardápio…</main>;
   const context: AppContext = { business, products, cart, add, change, clearCart, summary };
-  return <main className="app-shell"><header className="public-header"><button className="brand" onClick={() => navigate("/")} aria-label="Ir para o início"><BrandLogo compact /></button><button className="cart-button" onClick={() => navigate("/carrinho")} aria-label="Abrir pedido"><ShoppingBag size={19} aria-hidden="true" />{cart.length > 0 && <b>{cart.reduce((n, l) => n + l.quantity, 0)}</b>}</button></header>{notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice("")}>×</button></div>}<Outlet context={context} /></main>;
+  return <main className="app-shell"><header className="public-header"><button className="brand" onClick={() => navigate("/")} aria-label="Ir para o início"><BrandLogo compact /></button><button className="cart-button" onClick={() => navigate("/carrinho")} aria-label="Abrir pedido"><ShoppingBag size={19} aria-hidden="true" />{cart.length > 0 && <b key={cart.reduce((n, l) => n + l.quantity, 0)}>{cart.reduce((n, l) => n + l.quantity, 0)}</b>}</button></header>{notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice("")}>×</button></div>}{addedNotice && <div className="added-toast" role="status" aria-live="polite">{addedNotice.text}</div>}<Outlet context={context} /></main>;
 }
 
 function HomeRoute() {
