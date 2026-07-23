@@ -55,6 +55,7 @@ with sync_playwright() as p:
     reduced_add_button.click()
     assert "added" in (reduced_add_button.get_attribute("class") or "")
     page.locator(".added-toast").wait_for(state="visible", timeout=1000)
+    assert page.locator(".added-toast").evaluate("el => getComputedStyle(el).animationDuration") == "1e-05s"
 
     print("cart_add_feedback_smoke: OK")
     browser.close()
