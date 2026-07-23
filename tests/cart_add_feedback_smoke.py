@@ -55,7 +55,8 @@ with sync_playwright() as p:
     reduced_add_button.click()
     assert "added" in (reduced_add_button.get_attribute("class") or "")
     page.locator(".added-toast").wait_for(state="visible", timeout=1000)
-    assert page.locator(".added-toast").evaluate("el => getComputedStyle(el).animationDuration") == "1e-05s"
+    animation_duration = page.locator(".added-toast").evaluate("el => parseFloat(getComputedStyle(el).animationDuration)")
+    assert animation_duration < 0.001  # a regra global corta para .01ms; checa magnitude, não a serialização exata do Chromium
 
     print("cart_add_feedback_smoke: OK")
     browser.close()
