@@ -1116,16 +1116,7 @@ git commit -m "refactor(agent): make TextConversationService.processText async"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/agent_text_conversation_service.test.ts`. First add these two small test helpers near the top of the file (after the existing `ambiguous(...)` helper):
-
-```ts
-function fakeLlmMatched(actions: DeterministicInterpretationResult extends never ? never : Parameters<typeof Array.prototype.push>[0][], // placeholder type never used — see actual actions typing below
-) {
-  return actions;
-}
-```
-
-Actually, use the real action type directly instead of the placeholder above — import it:
+Add to `tests/agent_text_conversation_service.test.ts`. First add these test helpers near the top of the file (after the existing `ambiguous(...)` helper), importing the real action/result types:
 
 ```ts
 import type { AgentConversationAction } from "../src/agent/conversation.types.ts";
@@ -2246,7 +2237,7 @@ git commit -m "feat(agent): add per-instance per-session lock; cover LLM concurr
 - Verify: `tests/agent_simulator.test.ts` (no code change expected, just confirm it still passes)
 
 **Interfaces:**
-- Produces: `export function createSimulatorRuntime(input: { domainStore: AgentDomainStore; maxMisunderstandings?: number; llmInterpreter?: LlmInterpreter; llmMode?: "DISABLED" | "FALLBACK"; maxLlmInputLength?: number }): { tools: AgentTools; sessionStore: InMemoryAgentSessionStore; textService: TextConversationService }` — used by `runSimulator()` internally; also importable by future tests. The CLI (`runSimulator`) calls it with no `llmInterpreter`/`llmMode`, so the running simulator stays LLM-disabled by default, unchanged from today.
+- Produces: `export function createSimulatorRuntime(input: { domainStore: AgentDomainStore; maxMisunderstandings?: number; llmInterpreter?: LlmInterpreter; llmMode?: "DISABLED" | "FALLBACK"; maxLlmInputLength?: number }): { tools: AgentTools; sessionStore: InMemoryAgentSessionStore; conversationService: AgentConversationService; textService: TextConversationService }` — used by `runSimulator()` internally; also importable by future tests. The CLI (`runSimulator`) calls it with no `llmInterpreter`/`llmMode`, so the running simulator stays LLM-disabled by default, unchanged from today.
 
 - [ ] **Step 1: Extract `createSimulatorRuntime` in `src/agent/simulator.ts`**
 
@@ -2271,6 +2262,7 @@ export type SimulatorRuntimeOptions = {
 export type SimulatorRuntime = {
   tools: ReturnType<typeof createAgentTools>;
   sessionStore: InMemoryAgentSessionStore;
+  conversationService: ReturnType<typeof createAgentConversationService>;
   textService: TextConversationService;
 };
 
@@ -2279,6 +2271,9 @@ export type SimulatorRuntime = {
 // depender de variável de ambiente nem de spawn de processo. O CLI real
 // (runSimulator) sempre chama isto sem llmInterpreter/llmMode, então a
 // execução via `npm run agent:simulate` continua com o LLM desabilitado.
+// Devolve `conversationService` também porque o modo `action` cru do
+// simulador (linha do stdin com `action`, não `text`) continua chamando-o
+// diretamente, sem passar pelo Text Conversation Service.
 export function createSimulatorRuntime(options: SimulatorRuntimeOptions): SimulatorRuntime {
   const tools = createAgentTools({ store: options.domainStore });
   const sessionStore = new InMemoryAgentSessionStore();
@@ -2292,7 +2287,7 @@ export function createSimulatorRuntime(options: SimulatorRuntimeOptions): Simula
     llmMode: options.llmMode,
     maxLlmInputLength: options.maxLlmInputLength,
   });
-  return { tools, sessionStore, textService };
+  return { tools, sessionStore, conversationService, textService };
 }
 ```
 
@@ -2315,10 +2310,10 @@ Replace, inside `runSimulator()`, the block that currently builds `tools`/`sessi
     process.exitCode = 1;
     return;
   }
-  const { tools, sessionStore, textService } = runtime;
+  const { tools, sessionStore, conversationService, textService } = runtime;
 ```
 
-(This removes the standalone `const service = createAgentConversationService({ sessionStore, tools });` line too, since `createSimulatorRuntime` now owns building it — check that nothing later in `runSimulator` references the old `service` variable outside the `action`-kind branch; it does, at the old lines 285-290 for the raw `action` mode. Keep a `conversationService` reference available for that branch by also destructuring it: change `createSimulatorRuntime`'s return type to also include `conversationService: AgentConversationService`, add it to the returned object, and destructure `{ tools, sessionStore, textService, conversationService }` in `runSimulator`. Update the raw-`action` branch's `service.processAction(...)` call (line 285) to `conversationService.processAction(...)`.)
+This removes the standalone `const service = createAgentConversationService({ sessionStore, tools });` line, since `createSimulatorRuntime` now owns building it. The raw-`action` branch further down in `runSimulator` (the one that does not go through `textService`, around the old lines 285-290) still needs a `AgentConversationService` reference — update its `service.processAction(...)` call to `conversationService.processAction(...)` using the `conversationService` destructured above. Search the whole file for `service.processAction` and `service.` after this change to confirm no stale reference to the old local `service` variable remains.
 
 Update the `await textService.processText(...)` call (from Task 5) — already `await`ed, no further change needed here.
 
