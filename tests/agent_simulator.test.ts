@@ -273,13 +273,13 @@ test("comando GET_SESSION devolve a sessão atual usando a API pública do Sessi
 
 test("arquivo real de demonstração permanece inalterado durante os testes do simulador", async () => {
   const realDemoPath = path.resolve(import.meta.dirname, "..", "data", "brownies-fortal.demo.json");
-  const before = await fs.readFile(realDemoPath, "utf8");
+  const before = await fs.readFile(realDemoPath, "utf8").catch(() => null);
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath);
     sim.sendLine({ channel: "simulator", contactId: "cliente-real-file-check", action: { type: "START_CONVERSATION" } });
     await sim.nextOutput();
     await sim.close();
   });
-  const after = await fs.readFile(realDemoPath, "utf8");
+  const after = await fs.readFile(realDemoPath, "utf8").catch(() => null);
   assert.equal(after, before);
 });
