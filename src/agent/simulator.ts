@@ -148,6 +148,19 @@ export function buildSeedDomainStore(): AgentDomainStore {
 }
 
 async function runSimulator(): Promise<void> {
+  if (!process.env.BF_STORE_PATH?.trim()) {
+    console.log(
+      JSON.stringify({
+        ok: false,
+        error: {
+          code: "MISSING_BF_STORE_PATH",
+          message: "Defina BF_STORE_PATH — o simulador não escreve no arquivo de dados real.",
+        },
+      }),
+    );
+    process.exitCode = 1;
+    return;
+  }
   const storePath = resolveStorePath();
   // Suppress console.log during store initialization since we output only JSON to stdout
   const originalLog = console.log;

@@ -228,18 +228,14 @@ test("fluxo completo cria pedido pela Tool oficial e persiste somente após ORDE
       { messageId: "f9", action: { type: "CONFIRM_ORDER" } },
     ];
 
-    let fileExistedBeforeOrder = true;
-    try {
-      await fs.access(storePath);
-    } catch {
-      fileExistedBeforeOrder = false;
-    }
-    assert.equal(fileExistedBeforeOrder, false);
-
     let last: { result: { event: string } } | undefined;
     for (const step of flow) {
       sim.sendLine({ channel: "simulator", contactId, messageId: step.messageId, action: step.action });
       last = (await sim.nextOutput()) as { result: { event: string } };
+      if (step.messageId === "f1") {
+        const afterFirstAction = JSON.parse(await fs.readFile(storePath, "utf8")) as { orders: unknown[] };
+        assert.equal(afterFirstAction.orders.length, 0);
+      }
     }
     assert.equal(last?.result.event, "ORDER_CREATED");
 
