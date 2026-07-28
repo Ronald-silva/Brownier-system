@@ -392,3 +392,15 @@ test("NOT_UNDERSTOOD without reason is rejected", () => {
   const result = validate({ status: "NOT_UNDERSTOOD" }, atStep("BUILDING_ORDER"));
   assert.deepEqual(result, { status: "REJECTED", reason: "REASON_REQUIRED" });
 });
+
+test("REVIEW_ORDER is accepted in COLLECTING_NOTES, COLLECTING_PAYMENT and AWAITING_CONFIRMATION", () => {
+  for (const step of ["COLLECTING_NOTES", "COLLECTING_PAYMENT", "AWAITING_CONFIRMATION"] as const) {
+    const result = validate({ status: "MATCHED", actions: [{ type: "REVIEW_ORDER" }] }, atStep(step));
+    assert.deepEqual(result, { status: "MATCHED", actions: [{ type: "REVIEW_ORDER" }] });
+  }
+});
+
+test("REVIEW_ORDER is still rejected outside the steps the Engine actually supports it in", () => {
+  const result = validate({ status: "MATCHED", actions: [{ type: "REVIEW_ORDER" }] }, atStep("BUILDING_ORDER"));
+  assert.deepEqual(result, { status: "REJECTED", reason: "ACTION_NOT_ALLOWED_FOR_STEP" });
+});

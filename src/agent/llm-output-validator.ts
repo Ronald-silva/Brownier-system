@@ -47,8 +47,9 @@ const ALLOWED_ACTION_TYPES: ReadonlySet<AgentConversationAction["type"]> = new S
 ]);
 
 // Classificação local por etapa (código, nunca confiado ao LLM). REVIEW_ORDER
-// não aparece em nenhuma etapa: a spec não define uma etapa elegível para
-// ele, então fica bloqueado por padrão (ver limitações no relatório final).
+// é permitido exatamente nas três etapas em que conversation.engine.ts's
+// handleReviewOrder() o aceita (COLLECTING_NOTES, COLLECTING_PAYMENT,
+// AWAITING_CONFIRMATION) — fora delas, continua bloqueado.
 const STEP_ALLOWED_ACTIONS: Record<AgentConversationStep, ReadonlySet<string>> = {
   START: new Set(["START_CONVERSATION", "SHOW_MENU", "REQUEST_HUMAN", "RESET_CONVERSATION"]),
   BROWSING_MENU: new Set([
@@ -97,14 +98,15 @@ const STEP_ALLOWED_ACTIONS: Record<AgentConversationStep, ReadonlySet<string>> =
   COLLECTING_NOTES: new Set([
     "SET_CUSTOMER_NOTES",
     "SKIP_CUSTOMER_NOTES",
+    "REVIEW_ORDER",
     "SHOW_MENU",
     "GO_BACK",
     "CANCEL_CONVERSATION",
     "REQUEST_HUMAN",
     "RESET_CONVERSATION",
   ]),
-  COLLECTING_PAYMENT: new Set(["SET_PAYMENT_METHOD", "SHOW_MENU", "GO_BACK", "CANCEL_CONVERSATION", "REQUEST_HUMAN", "RESET_CONVERSATION"]),
-  AWAITING_CONFIRMATION: new Set(["CONFIRM_ORDER", "GO_BACK", "CANCEL_CONVERSATION", "REQUEST_HUMAN"]),
+  COLLECTING_PAYMENT: new Set(["SET_PAYMENT_METHOD", "REVIEW_ORDER", "SHOW_MENU", "GO_BACK", "CANCEL_CONVERSATION", "REQUEST_HUMAN", "RESET_CONVERSATION"]),
+  AWAITING_CONFIRMATION: new Set(["CONFIRM_ORDER", "REVIEW_ORDER", "GO_BACK", "CANCEL_CONVERSATION", "REQUEST_HUMAN"]),
   ORDER_CREATED: new Set(["RESET_CONVERSATION", "SHOW_MENU", "REQUEST_HUMAN"]),
   HUMAN_HANDOFF: new Set(["RESET_CONVERSATION"]),
 };
