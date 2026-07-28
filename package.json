@@ -10,7 +10,8 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/**/*.test.ts",
-    "test:nim": "node scripts/test-nvidia-nim.mjs"
+    "test:nim": "node scripts/test-nvidia-nim.mjs",
+    "agent:simulate": "node --experimental-strip-types src/agent/simulator.ts"
   },
   "dependencies": {
     "express": "^4.21.2",

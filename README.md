@@ -46,6 +46,22 @@ npm run lint
 npm run build
 ```
 
+## Simulador local do agente
+
+Executa ações estruturadas do Conversation Engine pelo terminal, sem IA e sem WhatsApp — só para desenvolvimento local. Lê uma ação JSON por linha do stdin e imprime o resultado (sessão antes/depois, resultado do engine) em JSON por linha no stdout.
+
+```bash
+BF_STORE_PATH=/tmp/brownies-sim.json npm run agent:simulate
+```
+
+Exemplo de entrada (uma linha):
+
+```json
+{"channel": "simulator", "contactId": "cliente-001", "messageId": "msg-001", "action": {"type": "START_CONVERSATION"}}
+```
+
+Defina sempre `BF_STORE_PATH` para um arquivo temporário ao experimentar — sem essa variável, o simulador usa o mesmo arquivo de dados que o servidor real (`data/brownies-fortal.demo.json`).
+
 ## Arquitetura
 
 O Express serve a API e o Vite em desenvolvimento. O catálogo, as configurações e os pedidos são persistidos em JSON para a demonstração local. A regra de preço fica em `src/lib/pricing.ts` e é executada novamente no servidor antes de salvar qualquer pedido; valores enviados pelo navegador são ignorados.
