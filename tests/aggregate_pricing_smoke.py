@@ -16,8 +16,15 @@ with sync_playwright() as p:
         add_buttons.nth(1).click()
     page.wait_for_timeout(300)
 
+    # "Abrir pedido" é navegação client-side (SPA) — networkidle não garante
+    # que a troca de rota já aconteceu (não há atividade de rede nova para
+    # esperar), então as asserções abaixo podiam rodar contra a página do
+    # cardápio ainda renderizada, onde a dica de preço promocional aparece em
+    # todos os 6 produtos e inflava a contagem. Espera-se por estado real:
+    # URL estável e a linha do carrinho de fato visível no DOM.
     page.get_by_label("Abrir pedido").click()
-    page.wait_for_load_state("networkidle")
+    page.wait_for_url("**/carrinho")
+    page.locator(".cart-line").first.wait_for(state="visible")
 
     # Sem a dica de "faltam X" — o total de 20 já atingiu o mínimo
     assert page.locator("text=Faltam").count() == 0, "não deve mostrar a dica de desconto quando o total já atingiu o mínimo"

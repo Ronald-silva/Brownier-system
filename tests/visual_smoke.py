@@ -16,8 +16,8 @@ with sync_playwright() as p:
         assert page.locator("text=Escolha seu momento doce.").count() == 1
         assert page.locator("text=Brownie do Dia").count() == 1
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        page.goto("http://localhost:3000", wait_until="networkidle")
-        page.get_by_text("Área da equipe").click()
+        # Não há mais link público para o admin — navegamos direto para a rota.
+        page.goto("http://localhost:3000/equipe", wait_until="networkidle")
         page.get_by_label("Código de acesso").fill("brownies-demo")
         page.get_by_role("button", name="Entrar no painel").click()
         page.get_by_text("O que precisa da sua atenção.").wait_for()

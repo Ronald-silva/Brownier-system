@@ -1,5 +1,8 @@
 /* Camada editorial da vitrine; mantém a base funcional isolada. */
-.app-shell { overflow-x: hidden; }
+/* overflow-x fica só no html (não em .app-shell, nem em body) — o html repassa
+   seu overflow ao viewport sem se tornar ele mesmo um scroll container; body ou
+   .app-shell com overflow != visible quebrariam o position: sticky do header. */
+html { overflow-x: hidden; }
 .app-shell { --content-gutter: 28px; }
 /* Todas as telas públicas compartilham o mesmo contêiner editorial da Home. */
 .app-shell .page { box-sizing: border-box; width: 100%; max-width: none; margin: 0; padding-inline: calc(var(--content-gutter) + 20px); }
@@ -7,7 +10,8 @@
 .app-shell .hero, .app-shell .day-feature, .app-shell .social-proof, .app-shell .how { margin-left: var(--content-gutter); margin-right: var(--content-gutter); }
 .app-shell .page .product-grid { max-width: 100%; }
 .app-shell .page .menu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.public-header { height: 118px; padding: 10px 28px; background: var(--brand-cream); border-bottom: 1px solid var(--line); }
+.public-header { height: 118px; padding: 10px 28px; background: var(--brand-cream); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
+.toast { top: 130px; z-index: 11; }
 .public-header .brand { display: flex; align-items: center; min-height: 96px; }
 .public-header .brand-logo.compact { width: 96px; max-height: 96px; max-width: none; object-fit: contain; }
 .public-header .cart-button { width: 48px; height: 48px; background: #fff; }
@@ -41,9 +45,20 @@
 .related h2 { margin: 0 0 9px; font-size: 25px; }
 .related div { display: flex; gap: 8px; flex-wrap: wrap; }
 .related span { border: 1px solid var(--line); border-radius: 99px; padding: 8px 11px; color: var(--brand-brown); font-size: 12px; font-weight: 800; }
-.cart-line { align-items: center; border: 1px solid var(--line); border-radius: 12px; margin: 10px 0; padding: 12px; background: #fff; }
+/* Coluna de imagem do grid casada com o tamanho real da foto (60px) — evitava que a imagem
+   vazasse da coluna de 48px e apertasse o espaço com o texto. */
+.cart-line { grid-template-columns: 60px 1fr auto; align-items: center; gap: 14px; border: 1px solid var(--line); border-radius: 12px; margin: 10px 0; padding: 14px 16px; background: #fff; }
 .cart-line img { width: 60px; height: 60px; object-fit: cover; border-radius: 9px; }
+.cart-line h3 { margin: 0; }
+.cart-line > div > p { margin: 4px 0 0; }
+.cart-line .quantity.small { margin: 10px 0 0; gap: 4px; }
+/* Alvo de toque de 44x44 nos botões −/+ do carrinho, com o círculo visível (27px)
+   preservado e centralizado dentro — a área clicável cresce sem engordar o visual. */
+.quantity.small button { width: 44px; height: 44px; flex-shrink: 0; padding: 0; border: none; background: transparent; border-radius: 0; display: grid; place-items: center; }
+.quantity.small .qty-dot { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid var(--line); background: #fff; border-radius: 50%; color: inherit; }
 .cart-nudge { padding: 12px; border-radius: 10px; background: var(--brand-pink-light); color: var(--brand-brown); font-size: 12px; font-weight: 800; }
+.cart-nudge a { color: inherit; text-decoration: underline; }
+.footer-whatsapp { color: var(--brand-brown); font-weight: 800; text-decoration: underline; }
 .next-steps { margin: 22px 0; padding: 15px; text-align: left; border-radius: 11px; background: var(--brand-cream); color: var(--brand-brown); }
 .next-steps p { margin: 7px 0 0; font-size: 12px; line-height: 1.55; }
 .admin-toast { position: fixed; z-index: 20; right: 18px; top: 18px; padding: 11px 14px; border-radius: 9px; background: var(--brand-brown-dark); color: white; font-size: 12px; font-weight: 800; }
@@ -51,7 +66,7 @@
 .op-card { margin: 20px 0; padding: 20px; border-radius: 14px; background: var(--brand-brown-dark); color: var(--brand-cream); }.op-card p{margin:0;color:var(--brand-pink-light);font-size:10px;font-weight:800}.op-card h2{color:var(--brand-cream);margin:7px 0 14px}.quick-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.quick-actions button{min-height:76px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--brand-brown);font-size:22px}.quick-actions span{display:block;margin-top:6px;font-size:10px;font-weight:800}.op-product{display:grid;grid-template-columns:54px 1fr auto auto;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fff}
 .op-product details{grid-column:1/-1;margin-top:6px}
 .op-product summary{cursor:pointer;font-size:11px;font-weight:800;color:var(--brand-brown)}
-.op-product>div{min-width:0}.op-product h3{overflow-wrap:break-word}.op-product img{width:54px;height:54px;object-fit:cover;border-radius:9px}.op-product h3{margin:0;font-size:14px}.op-product p{margin:3px 0;color:var(--muted);font-size:11px}.product-flags b{margin-right:5px;color:var(--brand-pink);font-size:9px}.day-toggle{border:0;background:transparent;color:var(--brand-brown);font-size:11px;font-weight:800}.production-card{margin:12px 0;padding:22px;border-radius:14px;background:#fff;border:1px solid var(--line);font-size:17px}.production-card span{color:var(--brand-pink);font-size:11px;font-weight:800}.production-card h2{margin:7px 0;font-size:28px}.production-card strong{display:block;font-size:18px}.production-card p{color:var(--muted);font-size:13px}.production-card select{width:100%;margin-top:8px}@media(max-width:640px){.quick-actions{grid-template-columns:1fr 1fr}.op-product{grid-template-columns:48px 1fr auto}.op-product .day-toggle{grid-column:2/4;text-align:left;padding:0}.op-product img{width:48px;height:48px}}
+.op-product>div{min-width:0}.op-product h3{overflow-wrap:break-word}.op-product img{width:54px;height:54px;object-fit:cover;border-radius:9px}.op-product h3{margin:0;font-size:14px}.op-product p{margin:3px 0;color:var(--muted);font-size:11px}.product-flags b{margin-right:5px;color:var(--brand-pink);font-size:9px}.day-toggle{border:0;background:transparent;color:var(--brand-brown);font-size:11px;font-weight:800}.availability-control{display:flex;flex-direction:column;align-items:center;gap:4px}.avail-label{font-size:10px;font-weight:800;color:#4a754d;white-space:nowrap}.avail-label.off{color:#a54850}.production-card{margin:12px 0;padding:22px;border-radius:14px;background:#fff;border:1px solid var(--line);font-size:17px}.production-card span{color:var(--brand-pink);font-size:11px;font-weight:800}.production-card h2{margin:7px 0;font-size:28px}.production-card strong{display:block;font-size:18px}.production-card p{color:var(--muted);font-size:13px}.production-card select{width:100%;margin-top:8px}@media(max-width:640px){.quick-actions{grid-template-columns:1fr 1fr}.op-product{grid-template-columns:48px 1fr auto}.op-product .day-toggle{grid-column:2/4;text-align:left;padding:0}.op-product img{width:48px;height:48px}}
 @media (max-width: 640px) { .product-photo { height: 150px; } .product-hero-photo { height: 300px; } }
 @media (max-width: 760px) { .app-shell { --content-gutter: 18px; } .app-shell .page, .app-shell .section:not(.page) { padding-inline: var(--content-gutter); } .app-shell .page .menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .public-header { height: 108px; padding: 6px 18px; } .public-header .brand { min-height: 90px; } .public-header .brand-logo.compact { width: 90px; max-height: 90px; } .hero-photo { height: 210px; } .day-feature,.social-proof { margin-left: 18px; margin-right: 18px; } .day-feature button { float: none; display: block; margin-top: 15px; } }
+@media (max-width: 640px) { .public-header { height: 108px; padding: 6px 18px; } .public-header .brand { min-height: 90px; } .public-header .brand-logo.compact { width: 90px; max-height: 90px; } .hero-photo { height: 210px; } .day-feature,.social-proof { margin-left: 18px; margin-right: 18px; } .day-feature button { float: none; display: block; margin-top: 15px; } .toast { top: 120px; } }

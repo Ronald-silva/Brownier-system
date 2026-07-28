@@ -1,0 +1,22 @@
+# NVIDIA NIM — Cursor / OpenAI-compatible API
+
+## Configuração de inferência preferencial
+
+- Para solicitações de IA que sejam configuráveis neste projeto, use a API OpenAI-compatible do NVIDIA NIM.
+- Base URL: `https://integrate.api.nvidia.com/v1` (sem barra final).
+- Modelo primário: `nvidia/nemotron-3-super-120b-a12b`.
+- Modelo secundário/fallback: `meta/llama-3.3-70b-instruct`.
+- A chave deve permanecer somente na variável de ambiente `NVIDIA_API_KEY`; nunca a inclua no código, em arquivos versionados, prompts, logs ou respostas.
+
+## Implementação de integrações
+
+- Em Node.js/TypeScript, use a biblioteca oficial `openai` com `baseURL: "https://integrate.api.nvidia.com/v1"` e `apiKey: process.env.NVIDIA_API_KEY`.
+- O modelo pode ser sobrescrito para testes por `NVIDIA_NIM_MODEL`; o padrão é o modelo primário acima.
+- Em caso de indisponibilidade explícita do modelo primário, tente o modelo secundário e registre qual modelo respondeu, sem expor credenciais.
+- Antes de concluir mudanças relacionadas à IA, execute `npm run test:nim` quando `NVIDIA_API_KEY` estiver disponível.
+
+## Limites do Cursor
+
+- Este arquivo orienta o comportamento no repositório; ele não configura as preferências globais da interface do Cursor.
+- Para o chat nativo, configure manualmente `Settings > Models > API Keys > OpenAI API Key` e habilite `Override OpenAI Base URL` com a URL acima.
+- Priorize conversas somente de texto neste provedor. Recursos proprietários do Cursor, modelos internos e anexos de imagem podem não ser compatíveis com o override de endpoint.

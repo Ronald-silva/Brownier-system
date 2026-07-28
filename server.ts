@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createServer as createViteServer } from "vite";
-import { calculateLinePrice, type PricingProduct } from "./src/lib/pricing.ts";
+import { type PricingProduct } from "./src/lib/pricing.ts";
 import { ORDER_STATUSES } from "./src/lib/orderStatuses.ts";
-import { sanitizeOptionalText } from "./src/lib/sanitize.ts";
+import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.ts";
+import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 
 type Product = PricingProduct & {
   id: string; slug: string; description: string; category: string; imageUrl: string;
@@ -15,17 +15,69 @@ type Product = PricingProduct & {
 type Store = {
   business: Record<string, unknown>;
   products: Product[];
-  orders: Array<Record<string, unknown>>;
+  orders: Order[];
 };
 
-const storePath = path.join(process.cwd(), "data", "brownies-fortal.demo.json");
+const storePath = resolveStorePath();
 const orderStatuses = ORDER_STATUSES;
 const limitedRequests = new Map<string, { count: number; started: number }>();
+
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const INSECURE_DEFAULT_ADMIN_CODE = "brownies-demo";
+const ADMIN_SESSION_TTL_MS = Number(process.env.ADMIN_SESSION_TTL_MS) > 0 ? Number(process.env.ADMIN_SESSION_TTL_MS) : 4 * 60 * 60 * 1000;
+const LOGIN_WINDOW_MS = Number(process.env.ADMIN_LOGIN_WINDOW_MS) > 0 ? Number(process.env.ADMIN_LOGIN_WINDOW_MS) : 10 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+const loginAttempts = new Map<string, { count: number; started: number }>();
+const adminSessionSecret = crypto.randomBytes(32);
+let resolvedAdminAccessCode: string;
+
+// Falha alto e explicitamente em produção em vez de aceitar o código de demo
+// conhecido publicamente — chamada uma única vez, antes do app.listen, para
+// que um ADMIN_ACCESS_CODE ausente ou inseguro impeça o servidor de subir.
+function initializeAdminAuth() {
+  const configured = process.env.ADMIN_ACCESS_CODE?.trim() || "";
+  if (IS_PRODUCTION) {
+    if (!configured) throw new Error("ADMIN_ACCESS_CODE precisa estar definido em produção. Defina uma variável de ambiente forte antes de iniciar o servidor.");
+    if (configured === INSECURE_DEFAULT_ADMIN_CODE) throw new Error("ADMIN_ACCESS_CODE não pode usar o valor padrão de demonstração em produção. Defina um código forte e exclusivo.");
+    resolvedAdminAccessCode = configured;
+  } else {
+    resolvedAdminAccessCode = configured || INSECURE_DEFAULT_ADMIN_CODE;
+  }
+}
+function secureCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a); const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+function loginAttemptRecord(ip: string) {
+  const now = Date.now(); const entry = loginAttempts.get(ip);
+  return !entry || now - entry.started > LOGIN_WINDOW_MS ? { count: 0, started: now } : entry;
+}
+// Token opaco assinado (HMAC) contendo apenas um timestamp de expiração — nunca
+// o código administrativo — e verificado com comparação de tempo constante.
+function signSessionPayload(payload: string): string {
+  return crypto.createHmac("sha256", adminSessionSecret).update(payload).digest("base64url");
+}
+function createAdminSessionToken(): string {
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + ADMIN_SESSION_TTL_MS }), "utf8").toString("base64url");
+  return `${payload}.${signSessionPayload(payload)}`;
+}
+function verifyAdminSessionToken(token: string | undefined): boolean {
+  if (!token) return false;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return false;
+  if (!secureCompare(signature, signSessionPayload(payload))) return false;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: number };
+    return typeof data.exp === "number" && Date.now() < data.exp;
+  } catch { return false; }
+}
 
 const demoStore: Store = {
   business: {
     name: "Brownieria Fortal", tagline: "Brownies artesanais para tornar seu dia mais doce", description: "Veja os sabores disponíveis hoje e monte seu pedido em poucos minutos.",
     phone: "", whatsapp: "", address: "", hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
+    pickupSlots: [],
     paymentMethods: ["PIX", "DINHEIRO", "A_COMBINAR"], deliveryFee: 0,
     receivedMessage: "Recebemos seu pedido! A equipe vai confirmar os detalhes em breve.",
     availabilityNotice: "Os sabores podem variar conforme a disponibilidade.",
@@ -47,23 +99,17 @@ const demoStore: Store = {
   orders: [],
 };
 
-async function loadStore(): Promise<Store> {
-  try { return JSON.parse(await fs.readFile(storePath, "utf8")) as Store; }
-  catch { await saveStore(demoStore); return structuredClone(demoStore); }
-}
-async function saveStore(store: Store) {
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  await fs.writeFile(storePath, JSON.stringify(store, null, 2) + "\n", "utf8");
-}
+async function loadStore(): Promise<Store> { return loadStoreFile(storePath, () => demoStore); }
+async function saveStore(store: Store) { return saveStoreFile(storePath, store); }
 function publicProduct(product: Product) {
   const { id, slug, name, description, category, imageUrl, basePrice, promotionalPrice, minimumPromotionalQuantity, isAvailable, isFeatured, displayOrder, ingredients, allergens, updatedAt } = product;
   return { id, slug, name, description, category, imageUrl, basePrice, promotionalPrice, minimumPromotionalQuantity, isAvailable, isFeatured, displayOrder, ingredients, allergens, updatedAt };
 }
 function validText(value: unknown, max: number) { return typeof value === "string" && value.trim().length > 0 && value.trim().length <= max; }
 function admin(req: Request, res: Response, next: NextFunction) {
-  const configured = process.env.ADMIN_ACCESS_CODE;
-  const expected = configured || "brownies-demo";
-  if (req.header("x-admin-code") !== expected) return res.status(401).json({ error: "Acesso administrativo não autorizado." });
+  const header = req.header("authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : undefined;
+  if (!verifyAdminSessionToken(token)) return res.status(401).json({ error: "Sessão administrativa inválida ou expirada." });
   next();
 }
 function publicRateLimit(req: Request, res: Response, next: NextFunction) {
@@ -76,6 +122,7 @@ function publicRateLimit(req: Request, res: Response, next: NextFunction) {
 function publicCode() { return `BF-${crypto.randomBytes(4).toString("hex").toUpperCase()}`; }
 
 async function startServer() {
+  initializeAdminAuth();
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -105,26 +152,33 @@ async function startServer() {
     res.json(safe);
   });
   app.post("/api/public/orders", publicRateLimit, async (req, res) => {
-    const { items, customerName, customerPhone, fulfillmentType, deliveryAddress, reference, customerNotes, paymentMethod, changeFor } = req.body ?? {};
-    if (!Array.isArray(items) || items.length === 0 || items.length > 30) return res.status(400).json({ error: "O pedido precisa ter pelo menos um item." });
-    if (!validText(customerName, 100) || !validText(customerPhone, 30)) return res.status(400).json({ error: "Informe nome e telefone." });
-    if (!["RETIRADA", "ENTREGA"].includes(fulfillmentType) || !["PIX", "DINHEIRO", "A_COMBINAR"].includes(paymentMethod)) return res.status(400).json({ error: "Recebimento ou pagamento inválido." });
-    const store = await loadStore(); const business = store.business as { pickupEnabled?: boolean; deliveryEnabled?: boolean; deliveryFee?: number };
-    if (fulfillmentType === "ENTREGA" && (!business.deliveryEnabled || !validText(deliveryAddress, 300))) return res.status(400).json({ error: "Informe o endereço de entrega." });
-    if (fulfillmentType === "RETIRADA" && !business.pickupEnabled) return res.status(400).json({ error: "Retirada indisponível no momento." });
-    const orderItems = [] as Array<Record<string, unknown>>; let subtotal = 0; let discount = 0;
-    const totalQuantity = items.reduce((sum: number, item: any) => sum + Number(item?.quantity || 0), 0);
-    for (const item of items) {
-      const quantity = Number(item?.quantity); const product = store.products.find(p => p.id === item?.productId && p.isActive && p.isAvailable);
-      if (!product || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) return res.status(400).json({ error: "Há um produto indisponível ou uma quantidade inválida." });
-      const price = calculateLinePrice(product, quantity, totalQuantity); subtotal += price.total; discount += price.discount;
-      orderItems.push({ productId: product.id, productName: product.name, unitPrice: price.unitPrice, quantity, totalPrice: price.total });
+    const store = await loadStore();
+    try {
+      const { order, replayed } = createOrder({
+        store,
+        payload: req.body ?? {},
+        idempotencyKey: req.header("Idempotency-Key"),
+        generatePublicCode: publicCode,
+      });
+      if (!replayed) await saveStore(store);
+      res.setHeader("Idempotency-Replayed", replayed ? "true" : "false");
+      res.status(replayed ? 200 : 201).json(order);
+    } catch (error) {
+      if (error instanceof OrderCreationError) return res.status(error.status).json({ error: error.message });
+      console.error(error);
+      res.status(500).json({ error: "Não foi possível criar o pedido." });
     }
-    const deliveryFee = fulfillmentType === "ENTREGA" ? Number(business.deliveryFee || 0) : 0;
-    const order = { id: crypto.randomUUID(), publicCode: publicCode(), status: "NOVO", fulfillmentType, paymentMethod, subtotal, discount, deliveryFee, total: subtotal + deliveryFee, customerName: customerName.trim(), customerPhone: customerPhone.trim(), deliveryAddress: sanitizeOptionalText(deliveryAddress), reference: sanitizeOptionalText(reference), customerNotes: sanitizeOptionalText(customerNotes), internalNotes: "", changeFor: sanitizeOptionalText(changeFor), items: orderItems, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    store.orders.unshift(order); await saveStore(store); res.status(201).json(order);
   });
 
+  app.post("/api/admin/login", (req, res) => {
+    const ip = req.ip || "unknown";
+    const record = loginAttemptRecord(ip);
+    if (record.count >= LOGIN_MAX_ATTEMPTS) { loginAttempts.set(ip, record); return res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." }); }
+    const code = typeof req.body?.code === "string" ? req.body.code : "";
+    if (!code || !secureCompare(code, resolvedAdminAccessCode)) { record.count += 1; loginAttempts.set(ip, record); return res.status(401).json({ error: "Código de acesso inválido." }); }
+    loginAttempts.delete(ip);
+    res.json({ token: createAdminSessionToken(), expiresIn: ADMIN_SESSION_TTL_MS });
+  });
   app.get("/api/admin/bootstrap", admin, async (_req, res) => res.json(await loadStore()));
   app.put("/api/admin/business", admin, async (req, res) => {
     const store = await loadStore(); store.business = { ...store.business, ...req.body, name: "Brownieria Fortal" }; await saveStore(store); res.json(store.business);
