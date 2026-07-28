@@ -133,8 +133,13 @@ function llmNotUnderstood(reason: string, suggestions?: string[]): LlmInterpreta
     ? { status: "NOT_UNDERSTOOD", reason, suggestions, source: "LLM", promptVersion: "test", durationMs: 1 }
     : { status: "NOT_UNDERSTOOD", reason, source: "LLM", promptVersion: "test", durationMs: 1 };
 }
-function llmAmbiguous(reason: string): LlmInterpretationResult {
-  return { status: "AMBIGUOUS", reason, source: "LLM", promptVersion: "test", durationMs: 1 };
+function llmAmbiguous(
+  reason: string,
+  candidates?: { action: AgentConversationAction; label?: string }[],
+): LlmInterpretationResult {
+  return candidates
+    ? { status: "AMBIGUOUS", reason, candidates, source: "LLM", promptVersion: "test", durationMs: 1 }
+    : { status: "AMBIGUOUS", reason, source: "LLM", promptVersion: "test", durationMs: 1 };
 }
 function llmRejected(reason: string): LlmInterpretationResult {
   return { status: "REJECTED", reason, source: "VALIDATOR", promptVersion: "test", durationMs: 1 };
@@ -702,11 +707,17 @@ test("LLM AMBIGUOUS incrementa o contador uma única vez e não expõe candidato
   const { textService } = makeStack({
     llmMode: "FALLBACK",
     interpretMessage: () => notUnderstood("GENERIC"),
-    interpretWithLlm: async () => llmAmbiguous("AMBIGUOUS_PRODUCT"),
+    interpretWithLlm: async () =>
+      llmAmbiguous("AMBIGUOUS_PRODUCT", [
+        { action: { type: "ADD_ITEM", productId: "brownie-secreto-1", quantity: 1 }, label: "Brownie A" },
+        { action: { type: "ADD_ITEM", productId: "brownie-secreto-2", quantity: 1 }, label: "Brownie B" },
+      ]),
   });
   const result = await textService.processText({ channel: CH, contactId: "llm-amb", text: "quero um brownie" });
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   assert.equal(result.policyResult?.messageKey, "INTERPRETATION_AMBIGUOUS");
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /brownie-secreto|productId/);
 });
 
 test("LLM REJECTED incrementa o contador uma única vez e não expõe o motivo técnico", async () => {
@@ -719,6 +730,7 @@ test("LLM REJECTED incrementa o contador uma única vez e não expõe o motivo t
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /ACTION_NOT_ALLOWED/);
+  assert.doesNotMatch(serialized, /promptVersion/);
 });
 
 test("suggestions do LLM em NOT_UNDERSTOOD são sanitizadas (dedupe, limite, sem vazio)", async () => {

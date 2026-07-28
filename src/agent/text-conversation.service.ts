@@ -182,16 +182,34 @@ function publicSuggestions(suggestions: string[] | undefined): string[] {
   return out;
 }
 
-// O LLM Interpreter e o Output Validator carregam, no campo `reason` de um
-// resultado REJECTED, motivos técnicos internos de validação (ação proibida,
-// produto/horário/pagamento alucinado, lote inválido, schema inválido etc.)
-// — nunca pensados para sair do processo. Diferente de NOT_UNDERSTOOD/
-// AMBIGUOUS, cujos `reason` já são categorias pensadas para uso público/
-// observabilidade (ex.: "GENERIC", "AMBIGUOUS_PRODUCT"), o `reason` de
-// REJECTED nunca deve aparecer no ProcessTextResult devolvido ao chamador.
+// O LLM Interpreter e o Output Validator carregam campos nunca pensados para
+// sair do processo: o `reason` de um resultado REJECTED traz motivos
+// técnicos internos de validação (ação proibida, produto/horário/pagamento
+// alucinado, lote inválido, schema inválido etc.), `promptVersion` é detalhe
+// de infraestrutura do provider, e os `candidates` de AMBIGUOUS carregam
+// AgentConversationAction com productId interno. Diferente de NOT_UNDERSTOOD,
+// cujo `reason` já é uma categoria pensada para uso público/observabilidade
+// (ex.: "GENERIC"), REJECTED e os candidatos de AMBIGUOUS nunca devem
+// aparecer no ProcessTextResult devolvido ao chamador — construímos objetos
+// estreitos em vez de espalhar (`...outcome`) para nunca deixar um campo novo
+// vazar por acidente quando o tipo evoluir.
 function sanitizeLlmOutcomeForResult(outcome: LlmInterpretationResult): LlmInterpretationResult {
   if (outcome.status === "REJECTED") {
-    return { ...outcome, reason: "REJECTED_BY_VALIDATOR" };
+    return {
+      status: "REJECTED",
+      source: outcome.source,
+      reason: "REJECTED_BY_VALIDATOR",
+      durationMs: outcome.durationMs,
+    } as LlmInterpretationResult;
+  }
+  if (outcome.status === "AMBIGUOUS") {
+    return {
+      status: "AMBIGUOUS",
+      reason: outcome.reason,
+      source: outcome.source,
+      promptVersion: outcome.promptVersion,
+      durationMs: outcome.durationMs,
+    };
   }
   return outcome;
 }
