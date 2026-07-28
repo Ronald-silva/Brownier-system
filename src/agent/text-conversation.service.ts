@@ -9,7 +9,7 @@
 import type { AgentSession } from "./session.types.ts";
 import type { AgentSessionStore } from "./session.store.ts";
 import type { AgentTools } from "./tools.ts";
-import type { AgentConversationResult } from "./conversation.types.ts";
+import type { AgentConversationAction, AgentConversationResult } from "./conversation.types.ts";
 import type { AgentConversationService } from "./conversation.service.ts";
 import {
   interpretDeterministicMessage,
@@ -25,6 +25,8 @@ import {
   renderTextConversationPolicyMessage,
   type AgentChatMessage,
 } from "./renderer.ts";
+import { isLlmFallbackEligible } from "./llm-eligibility.ts";
+import type { LlmInterpreter, LlmInterpretationResult, InterpretLlmMessageInput } from "./llm-interpreter.types.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -39,6 +41,11 @@ const MIN_MAX_MISUNDERSTANDINGS = 1;
 const MAX_MAX_MISUNDERSTANDINGS = 10;
 const MAX_PUBLIC_SUGGESTIONS = 5;
 
+const DEFAULT_LLM_MODE = "DISABLED" as const;
+const DEFAULT_MAX_LLM_INPUT_LENGTH = 1000;
+const MIN_MAX_LLM_INPUT_LENGTH = 50;
+const MAX_MAX_LLM_INPUT_LENGTH = 10_000;
+
 export type TextConversationPolicyResult = {
   event: string;
   messageKey: string;
@@ -52,6 +59,8 @@ export type BuildInterpreterContextFn = (input: {
 
 export type InterpretMessageFn = (input: InterpretDeterministicMessageInput) => DeterministicInterpretationResult;
 
+export type InterpretWithLlmFn = (input: InterpretLlmMessageInput) => Promise<LlmInterpretationResult>;
+
 export type CreateTextConversationServiceDependencies = {
   conversationService: AgentConversationService;
   sessionStore: AgentSessionStore;
@@ -59,6 +68,10 @@ export type CreateTextConversationServiceDependencies = {
   maxMisunderstandings?: number;
   interpretMessage?: InterpretMessageFn;
   buildInterpreterContext?: BuildInterpreterContextFn;
+  llmInterpreter?: LlmInterpreter;
+  interpretWithLlm?: InterpretWithLlmFn;
+  llmMode?: "DISABLED" | "FALLBACK";
+  maxLlmInputLength?: number;
 };
 
 export type ProcessTextInput = {
@@ -68,10 +81,16 @@ export type ProcessTextInput = {
   text: string;
 };
 
+export type TextConversationInterpretationSummary = {
+  deterministic: DeterministicInterpretationResult;
+  llm?: LlmInterpretationResult;
+  finalSource: "DETERMINISTIC" | "LLM" | "POLICY";
+};
+
 export type ProcessTextResult = {
   sessionKey: string;
   duplicateMessage: boolean;
-  interpretation?: DeterministicInterpretationResult;
+  interpretation?: TextConversationInterpretationSummary;
   sessionBefore: AgentSession;
   sessionAfter: AgentSession;
   result?: AgentConversationResult;
@@ -82,6 +101,7 @@ export type ProcessTextResult = {
     misunderstandingCountAfter: number;
     handoffTriggered: boolean;
     counterReset: boolean;
+    technicalFailure?: boolean;
   };
 };
 
@@ -104,6 +124,21 @@ function validateMaxMisunderstandings(value: number): void {
     throw new TextConversationServiceError(
       "invalid_max_misunderstandings",
       `maxMisunderstandings deve ser um inteiro entre ${MIN_MAX_MISUNDERSTANDINGS} e ${MAX_MAX_MISUNDERSTANDINGS}.`,
+    );
+  }
+}
+
+function validateLlmMode(value: string): void {
+  if (value !== "DISABLED" && value !== "FALLBACK") {
+    throw new TextConversationServiceError("invalid_llm_mode", 'llmMode deve ser "DISABLED" ou "FALLBACK".');
+  }
+}
+
+function validateMaxLlmInputLength(value: number): void {
+  if (!Number.isInteger(value) || value < MIN_MAX_LLM_INPUT_LENGTH || value > MAX_MAX_LLM_INPUT_LENGTH) {
+    throw new TextConversationServiceError(
+      "invalid_max_llm_input_length",
+      `maxLlmInputLength deve ser um inteiro entre ${MIN_MAX_LLM_INPUT_LENGTH} e ${MAX_MAX_LLM_INPUT_LENGTH}.`,
     );
   }
 }
@@ -147,6 +182,45 @@ function publicSuggestions(suggestions: string[] | undefined): string[] {
   return out;
 }
 
+// O LLM Interpreter e o Output Validator carregam, no campo `reason` de um
+// resultado REJECTED, motivos técnicos internos de validação (ação proibida,
+// produto/horário/pagamento alucinado, lote inválido, schema inválido etc.)
+// — nunca pensados para sair do processo. Diferente de NOT_UNDERSTOOD/
+// AMBIGUOUS, cujos `reason` já são categorias pensadas para uso público/
+// observabilidade (ex.: "GENERIC", "AMBIGUOUS_PRODUCT"), o `reason` de
+// REJECTED nunca deve aparecer no ProcessTextResult devolvido ao chamador.
+function sanitizeLlmOutcomeForResult(outcome: LlmInterpretationResult): LlmInterpretationResult {
+  if (outcome.status === "REJECTED") {
+    return { ...outcome, reason: "REJECTED_BY_VALIDATOR" };
+  }
+  return outcome;
+}
+
+// Aplica uma única ação estruturada (determinística ou vinda do LLM) ao
+// Conversation Service e resolve o zeramento do contador de não compreensão.
+// Reusado tanto pelo caminho determinístico MATCHED quanto pelo caminho de
+// fallback do LLM MATCHED com uma única ação — nunca duplicado entre os dois.
+function applySingleAction(params: {
+  conversationService: AgentConversationService;
+  sessionStore: AgentSessionStore;
+  channel: string;
+  contactId: string;
+  messageId: string | undefined;
+  sessionKey: string;
+  action: AgentConversationAction;
+}): { engineResult: AgentConversationResult; sessionAfter: AgentSession; counterReset: boolean } {
+  const { conversationService, sessionStore, channel, contactId, messageId, sessionKey, action } = params;
+  const serviceResult = conversationService.processAction({ channel, contactId, messageId, action });
+  const engineResult = serviceResult.result;
+  const isInvalidAction = engineResult.messageKey === "INVALID_ACTION";
+  let sessionAfter = serviceResult.sessionAfter;
+  const counterReset = !isInvalidAction;
+  if (counterReset && sessionAfter.misunderstandingCount !== 0) {
+    sessionAfter = sessionStore.update(sessionKey, current => ({ ...current, misunderstandingCount: 0 }));
+  }
+  return { engineResult, sessionAfter, counterReset };
+}
+
 export function createTextConversationService(
   deps: CreateTextConversationServiceDependencies,
 ): TextConversationService {
@@ -161,6 +235,14 @@ export function createTextConversationService(
   validateMaxMisunderstandings(maxMisunderstandings);
   const interpretMessage = deps.interpretMessage ?? interpretDeterministicMessage;
   const buildInterpreterContext = deps.buildInterpreterContext ?? defaultBuildInterpreterContext;
+
+  const llmMode = deps.llmMode ?? DEFAULT_LLM_MODE;
+  validateLlmMode(llmMode);
+  const maxLlmInputLength = deps.maxLlmInputLength ?? DEFAULT_MAX_LLM_INPUT_LENGTH;
+  validateMaxLlmInputLength(maxLlmInputLength);
+  const interpretWithLlm: InterpretWithLlmFn | undefined =
+    deps.interpretWithLlm ?? (deps.llmInterpreter ? input => deps.llmInterpreter!.interpret(input) : undefined);
+  const llmEnabled = llmMode === "FALLBACK" && typeof interpretWithLlm === "function";
 
   return {
     async processText(input: ProcessTextInput): Promise<ProcessTextResult> {
@@ -198,29 +280,16 @@ export function createTextConversationService(
       const interpretation = interpretMessage({ text, session: sessionBefore, context });
 
       if (interpretation.status === "MATCHED") {
-        const serviceResult = conversationService.processAction({
-          channel,
-          contactId,
-          messageId,
-          action: interpretation.action,
+        const { engineResult, sessionAfter, counterReset } = applySingleAction({
+          conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: interpretation.action,
         });
-
-        const engineResult = serviceResult.result;
-        const isInvalidAction = engineResult.messageKey === "INVALID_ACTION";
-        let sessionAfter = serviceResult.sessionAfter;
-        const counterReset = !isInvalidAction;
-
-        if (counterReset && sessionAfter.misunderstandingCount !== 0) {
-          sessionAfter = sessionStore.update(sessionKey, current => ({ ...current, misunderstandingCount: 0 }));
-        }
-
         const presentation = buildConversationPresentation({ result: engineResult, session: sessionAfter, tools });
         const messages = renderConversationPresentation(presentation);
 
         return {
           sessionKey,
           duplicateMessage: false,
-          interpretation,
+          interpretation: { deterministic: interpretation, finalSource: "DETERMINISTIC" },
           sessionBefore,
           sessionAfter,
           result: { ...engineResult, session: structuredClone(sessionAfter) },
@@ -250,7 +319,7 @@ export function createTextConversationService(
         return {
           sessionKey,
           duplicateMessage: false,
-          interpretation,
+          interpretation: { deterministic: interpretation, finalSource: "POLICY" },
           sessionBefore,
           sessionAfter,
           policyResult,
@@ -263,6 +332,75 @@ export function createTextConversationService(
           },
         };
       }
+
+      let llmOutcome: LlmInterpretationResult | undefined;
+      if (llmEnabled) {
+        const eligibility = isLlmFallbackEligible({
+          deterministicResult: interpretation,
+          session: sessionBefore,
+          text,
+          maxLlmInputLength,
+        });
+        if (eligibility.eligible) {
+          llmOutcome = await interpretWithLlm!({ text, session: sessionBefore, context, deterministicResult: interpretation });
+        }
+      }
+
+      if (llmOutcome?.status === "PROVIDER_ERROR") {
+        const sessionAfterUnchanged = structuredClone(sessionStore.get(sessionKey)!);
+        const policyResult: TextConversationPolicyResult = {
+          event: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+          messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+        };
+        return {
+          sessionKey,
+          duplicateMessage: false,
+          interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "POLICY" },
+          sessionBefore,
+          sessionAfter: sessionAfterUnchanged,
+          policyResult,
+          messages: renderTextConversationPolicyMessage(policyResult),
+          policy: {
+            misunderstandingCountBefore,
+            misunderstandingCountAfter: misunderstandingCountBefore,
+            handoffTriggered: false,
+            counterReset: false,
+            technicalFailure: true,
+          },
+        };
+      }
+
+      if (llmOutcome?.status === "MATCHED" && llmOutcome.actions.length === 1) {
+        const { engineResult, sessionAfter, counterReset } = applySingleAction({
+          conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: llmOutcome.actions[0]!,
+        });
+        const presentation = buildConversationPresentation({ result: engineResult, session: sessionAfter, tools });
+        const messages = renderConversationPresentation(presentation);
+        return {
+          sessionKey,
+          duplicateMessage: false,
+          interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "LLM" },
+          sessionBefore,
+          sessionAfter,
+          result: { ...engineResult, session: structuredClone(sessionAfter) },
+          messages,
+          policy: {
+            misunderstandingCountBefore,
+            misunderstandingCountAfter: sessionAfter.misunderstandingCount,
+            handoffTriggered: false,
+            counterReset,
+          },
+        };
+      }
+
+      const failure: { status: "NOT_UNDERSTOOD" | "AMBIGUOUS"; suggestions: string[] } =
+        llmOutcome?.status === "NOT_UNDERSTOOD"
+          ? { status: "NOT_UNDERSTOOD", suggestions: publicSuggestions(llmOutcome.suggestions) }
+          : llmOutcome?.status === "AMBIGUOUS"
+            ? { status: "AMBIGUOUS", suggestions: [] }
+            : interpretation.status === "AMBIGUOUS"
+              ? { status: "AMBIGUOUS", suggestions: [] }
+              : { status: "NOT_UNDERSTOOD", suggestions: publicSuggestions(interpretation.suggestions) };
 
       const newCount = misunderstandingCountBefore + 1;
       const handoffTriggered = newCount >= maxMisunderstandings;
@@ -284,23 +422,25 @@ export function createTextConversationService(
       sessionAfter = structuredClone(sessionAfter);
 
       const remainingAttempts = Math.max(maxMisunderstandings - newCount, 0);
-      const suggestions =
-        interpretation.status === "NOT_UNDERSTOOD" ? publicSuggestions(interpretation.suggestions) : [];
 
       const policyResult: TextConversationPolicyResult = handoffTriggered
         ? { event: "HUMAN_HANDOFF_AUTOMATIC", messageKey: "HUMAN_HANDOFF_AUTOMATIC", data: { misunderstandingCount: newCount } }
-        : interpretation.status === "AMBIGUOUS"
+        : failure.status === "AMBIGUOUS"
           ? { event: "INTERPRETATION_AMBIGUOUS", messageKey: "INTERPRETATION_AMBIGUOUS", data: { misunderstandingCount: newCount } }
           : {
               event: "INTERPRETATION_NOT_UNDERSTOOD",
               messageKey: "INTERPRETATION_NOT_UNDERSTOOD",
-              data: { misunderstandingCount: newCount, remainingAttempts, suggestions },
+              data: { misunderstandingCount: newCount, remainingAttempts, suggestions: failure.suggestions },
             };
 
       return {
         sessionKey,
         duplicateMessage: false,
-        interpretation,
+        interpretation: {
+          deterministic: interpretation,
+          ...(llmOutcome ? { llm: sanitizeLlmOutcomeForResult(llmOutcome) } : {}),
+          finalSource: "POLICY",
+        },
         sessionBefore,
         sessionAfter,
         policyResult,

@@ -447,8 +447,8 @@ test("modo textual: entrada com text é aceita e 'oi' inicia a conversa", async 
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath);
     sim.sendLine({ channel: "simulator", contactId: "cliente-texto-oi", messageId: "tx1", text: "oi" });
-    const output = (await sim.nextOutput()) as { result: { event: string }; interpretation: { status: string } };
-    assert.equal(output.interpretation.status, "MATCHED");
+    const output = (await sim.nextOutput()) as { result: { event: string }; interpretation: { deterministic: { status: string } } };
+    assert.equal(output.interpretation.deterministic.status, "MATCHED");
     assert.equal(output.result.event, "WELCOME");
     await sim.close();
   });
@@ -631,12 +631,12 @@ test("modo textual: mensagem não compreendida não chama o Engine, mas incremen
     await sendTextFlow(sim, contactId, [{ messageId: "tu1", text: "oi" }]);
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "tu2", text: "blablabla sem sentido nenhum" }]);
     const result = output as {
-      interpretation?: { status: string };
+      interpretation?: { deterministic: { status: string } };
       result?: unknown;
       sessionAfter?: { step: string; misunderstandingCount: number };
       policy?: { misunderstandingCountAfter: number; handoffTriggered: boolean };
     };
-    assert.equal(result.interpretation?.status, "NOT_UNDERSTOOD");
+    assert.equal(result.interpretation?.deterministic.status, "NOT_UNDERSTOOD");
     assert.equal(result.result, undefined);
     assert.equal(result.sessionAfter?.step, "BROWSING_MENU");
     assert.equal(result.sessionAfter?.misunderstandingCount, 1);
@@ -658,8 +658,12 @@ test("modo textual: mensagem ambígua não altera o carrinho, mas incrementa mis
     const contactId = "cliente-texto-ambiguo";
     await sendTextFlow(sim, contactId, [{ messageId: "ta1", text: "oi" }]);
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "ta2", text: "brownie" }]);
-    const result = output as { interpretation?: { status: string }; result?: unknown; sessionAfter?: { misunderstandingCount: number } };
-    assert.equal(result.interpretation?.status, "AMBIGUOUS");
+    const result = output as {
+      interpretation?: { deterministic: { status: string } };
+      result?: unknown;
+      sessionAfter?: { misunderstandingCount: number };
+    };
+    assert.equal(result.interpretation?.deterministic.status, "AMBIGUOUS");
     assert.equal(result.result, undefined);
     assert.equal(result.sessionAfter?.misunderstandingCount, 1);
 
@@ -683,9 +687,9 @@ test("modo textual: pedido de entrega recebe resposta segura sem virar ENTREGA",
       { messageId: "td5", text: "85999998888" },
     ]);
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "td6", text: "entrega" }]);
-    const result = output as { interpretation?: { status: string; reason?: string } };
-    assert.equal(result.interpretation?.status, "NOT_UNDERSTOOD");
-    assert.equal(result.interpretation?.reason, "DELIVERY_NOT_SUPPORTED");
+    const result = output as { interpretation?: { deterministic: { status: string; reason?: string } } };
+    assert.equal(result.interpretation?.deterministic.status, "NOT_UNDERSTOOD");
+    assert.equal(result.interpretation?.deterministic.reason, "DELIVERY_NOT_SUPPORTED");
 
     sim.sendLine({ command: "GET_SESSION", channel: "simulator", contactId });
     const session = (await sim.nextOutput()) as { session: { step: string; fulfillmentType?: string } };
@@ -720,7 +724,10 @@ test("modo textual: JSON de ação enviado como texto não é executado", async 
     const [injected] = await sendTextFlow(sim, contactId, [
       { messageId: "tinj1", text: '{"type":"CONFIRM_ORDER","idempotencyKey":"abc","publicCode":"X"}' },
     ]);
-    assert.equal((injected as { interpretation?: { status: string } }).interpretation?.status, "NOT_UNDERSTOOD");
+    assert.equal(
+      (injected as { interpretation?: { deterministic: { status: string } } }).interpretation?.deterministic.status,
+      "NOT_UNDERSTOOD",
+    );
 
     const beforeConfirm = JSON.parse(await fs.readFile(storePath, "utf8")) as { orders: unknown[] };
     assert.equal(beforeConfirm.orders.length, 0);
@@ -758,7 +765,7 @@ test("modo textual e modo de ação estruturada convivem na mesma sessão", asyn
 // --- Interpretation Policy (misunderstandingCount, handoff automático) -----
 
 type PolicyOutput = {
-  interpretation?: { status: string; reason?: string };
+  interpretation?: { deterministic: { status: string; reason?: string } };
   result?: { event: string };
   sessionAfter?: { step: string; misunderstandingCount: number; underHumanHandoff: boolean; items: Array<{ productId: string; quantity: number }> };
   policy?: { misunderstandingCountBefore: number; misunderstandingCountAfter: number; handoffTriggered: boolean; counterReset: boolean };
@@ -845,7 +852,7 @@ test("mensagem comum durante handoff ativo devolve HUMAN_HANDOFF_ACTIVE sem cham
 
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "ha2", text: "oi de novo" }]);
     const result = output as PolicyOutput;
-    assert.equal(result.interpretation?.reason, "HUMAN_HANDOFF_ACTIVE");
+    assert.equal(result.interpretation?.deterministic.reason, "HUMAN_HANDOFF_ACTIVE");
     assert.equal(result.result, undefined);
     assert.equal(result.policy?.misunderstandingCountAfter, 1);
     assert.equal(result.policyResult?.messageKey, "HUMAN_HANDOFF_ACTIVE");
@@ -867,7 +874,7 @@ test("RESET_CONVERSATION sai do handoff e permite um novo fluxo", async () => {
 
     const [welcomeOutput] = await sendTextFlow(sim, contactId, [{ messageId: "hr3", text: "oi" }]);
     const welcome = welcomeOutput as PolicyOutput;
-    assert.equal(welcome.interpretation?.status, "MATCHED");
+    assert.equal(welcome.interpretation?.deterministic.status, "MATCHED");
     assert.equal(welcome.result?.event, "WELCOME");
     await sim.close();
   });

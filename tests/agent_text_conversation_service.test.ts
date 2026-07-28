@@ -9,6 +9,8 @@ import { createAgentConversationService } from "../src/agent/conversation.servic
 import { InMemoryAgentSessionStore, buildAgentSessionKey, type AgentSessionStore } from "../src/agent/session.store.ts";
 import { createAgentTools, type AgentDomainStore } from "../src/agent/tools.ts";
 import type { DeterministicInterpretationResult } from "../src/agent/interpreter.types.ts";
+import type { AgentConversationAction } from "../src/agent/conversation.types.ts";
+import type { LlmInterpretationResult } from "../src/agent/llm-interpreter.types.ts";
 
 // --- fábricas de teste (mesmo padrão de tests/agent_conversation_service.test.ts) ---
 
@@ -96,6 +98,9 @@ function makeStack(
     tools,
     maxMisunderstandings: opts.maxMisunderstandings,
     interpretMessage: opts.interpretMessage,
+    llmMode: opts.llmMode,
+    interpretWithLlm: opts.interpretWithLlm,
+    maxLlmInputLength: opts.maxLlmInputLength,
   });
   return { domainStore, tools, sessionStore, conversationService, textService };
 }
@@ -118,6 +123,24 @@ function ambiguous(reason: string, withCandidates = false): DeterministicInterpr
         ],
       }
     : { status: "AMBIGUOUS", reason, normalizedText: "texto" };
+}
+
+function llmMatched(actions: AgentConversationAction[]): LlmInterpretationResult {
+  return { status: "MATCHED", actions, source: "LLM", promptVersion: "test", durationMs: 1 };
+}
+function llmNotUnderstood(reason: string, suggestions?: string[]): LlmInterpretationResult {
+  return suggestions
+    ? { status: "NOT_UNDERSTOOD", reason, suggestions, source: "LLM", promptVersion: "test", durationMs: 1 }
+    : { status: "NOT_UNDERSTOOD", reason, source: "LLM", promptVersion: "test", durationMs: 1 };
+}
+function llmAmbiguous(reason: string): LlmInterpretationResult {
+  return { status: "AMBIGUOUS", reason, source: "LLM", promptVersion: "test", durationMs: 1 };
+}
+function llmRejected(reason: string): LlmInterpretationResult {
+  return { status: "REJECTED", reason, source: "VALIDATOR", promptVersion: "test", durationMs: 1 };
+}
+function llmProviderError(retryable: boolean): LlmInterpretationResult {
+  return { status: "PROVIDER_ERROR", reason: retryable ? "TIMEOUT" : "PROVIDER_REJECTED", retryable, promptVersion: "test", durationMs: 1 };
 }
 
 const CH = "simulator";
@@ -173,7 +196,7 @@ test("dependências obrigatórias ausentes lançam erro técnico", () => {
 test("MATCHED chama o Conversation Service e devolve o resultado do Engine", async () => {
   const { textService } = makeStack();
   const result = await textService.processText({ channel: CH, contactId: "matched-1", text: "oi" });
-  assert.equal(result.interpretation?.status, "MATCHED");
+  assert.equal(result.interpretation?.deterministic.status, "MATCHED");
   assert.equal(result.result?.event, "WELCOME");
 });
 
@@ -527,7 +550,7 @@ test("RESET_CONVERSATION é permitido durante handoff ativo e sai do handoff", a
   await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "recomeçar" });
-  assert.equal(result.interpretation?.status, "MATCHED");
+  assert.equal(result.interpretation?.deterministic.status, "MATCHED");
   assert.equal(result.sessionAfter.underHumanHandoff, false);
   assert.equal(result.sessionAfter.step, "START");
 });
@@ -549,7 +572,7 @@ test("depois do reset, um novo fluxo pode começar normalmente", async () => {
   await textService.processText({ channel: CH, contactId, text: "recomeçar" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "oi" });
-  assert.equal(result.interpretation?.status, "MATCHED");
+  assert.equal(result.interpretation?.deterministic.status, "MATCHED");
   assert.equal(result.result?.event, "WELCOME");
   assert.equal(result.sessionAfter.step, "BROWSING_MENU");
   assert.equal(result.sessionAfter.misunderstandingCount, 0);
@@ -561,8 +584,8 @@ test("REQUEST_HUMAN repetido durante handoff ativo não gera nova alteração", 
   await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "atendente" });
-  assert.equal(result.interpretation?.status, "NOT_UNDERSTOOD");
-  assert.equal((result.interpretation as { reason?: string }).reason, "HUMAN_HANDOFF_ACTIVE");
+  assert.equal(result.interpretation?.deterministic.status, "NOT_UNDERSTOOD");
+  assert.equal((result.interpretation?.deterministic as { reason?: string })?.reason, "HUMAN_HANDOFF_ACTIVE");
   assert.equal(result.sessionAfter.underHumanHandoff, true);
   assert.equal(result.policy.misunderstandingCountAfter, 1);
 });
@@ -602,4 +625,184 @@ test("messageId vazio é rejeitado com erro técnico controlado", async () => {
     () => textService.processText({ channel: CH, contactId: "invalid-message-id", messageId: "   ", text: "oi" }),
     TextConversationServiceError,
   );
+});
+
+// --- LLM fallback: desabilitado por padrão ---
+
+test("LLM desabilitado por padrão: falha elegível não chama o LLM", async () => {
+  let called = false;
+  const { textService } = makeStack({
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => { called = true; return llmMatched([{ type: "SHOW_MENU" }]); },
+  });
+  await textService.processText({ channel: CH, contactId: "llm-disabled", text: "Me separa dois tradicionais e um de ninho." });
+  assert.equal(called, false);
+});
+
+test("determinístico MATCHED nunca chama o LLM mesmo com FALLBACK ativo", async () => {
+  let called = false;
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretWithLlm: async () => { called = true; return llmMatched([{ type: "SHOW_MENU" }]); },
+  });
+  await textService.processText({ channel: CH, contactId: "llm-matched-skips", text: "oi" });
+  assert.equal(called, false);
+});
+
+test("falha não elegível nunca chama o LLM mesmo com FALLBACK ativo", async () => {
+  let called = false;
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("EMPTY_MESSAGE"),
+    interpretWithLlm: async () => { called = true; return llmMatched([{ type: "SHOW_MENU" }]); },
+  });
+  await textService.processText({ channel: CH, contactId: "llm-not-eligible", text: "   " });
+  assert.equal(called, false);
+});
+
+// --- LLM fallback: MATCHED com uma ação ---
+
+test("LLM MATCHED com uma ação executa pelo Conversation Service e zera o contador", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-single", text: "mostra o cardápio pra mim" });
+  assert.equal(result.result?.event, "MENU_READY");
+  assert.equal(result.policy.counterReset, true);
+  assert.equal(result.interpretation?.finalSource, "LLM");
+});
+
+test("nenhuma resposta bruta do provider nem prompt aparecem no retorno", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-no-raw", text: "mostra o cardápio" });
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /systemPrompt|userPrompt|CURRENT_STEP/);
+});
+
+// --- LLM fallback: NOT_UNDERSTOOD / AMBIGUOUS / REJECTED ---
+
+test("LLM NOT_UNDERSTOOD incrementa o contador uma única vez", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmNotUnderstood("GENERIC"),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-nu", text: "sei la o que quero" });
+  assert.equal(result.policy.misunderstandingCountAfter, 1);
+  assert.equal(result.interpretation?.finalSource, "POLICY");
+});
+
+test("LLM AMBIGUOUS incrementa o contador uma única vez e não expõe candidatos", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmAmbiguous("AMBIGUOUS_PRODUCT"),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-amb", text: "quero um brownie" });
+  assert.equal(result.policy.misunderstandingCountAfter, 1);
+  assert.equal(result.policyResult?.messageKey, "INTERPRETATION_AMBIGUOUS");
+});
+
+test("LLM REJECTED incrementa o contador uma única vez e não expõe o motivo técnico", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmRejected("ACTION_NOT_ALLOWED"),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-rejected", text: "faz alguma coisa estranha" });
+  assert.equal(result.policy.misunderstandingCountAfter, 1);
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /ACTION_NOT_ALLOWED/);
+});
+
+test("suggestions do LLM em NOT_UNDERSTOOD são sanitizadas (dedupe, limite, sem vazio)", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmNotUnderstood("GENERIC", ["PIX", "PIX", "  ", "DINHEIRO"]),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-suggestions", text: "como eu pago" });
+  assert.deepEqual(result.policyResult?.data?.suggestions, ["PIX", "DINHEIRO"]);
+});
+
+// --- LLM fallback: PROVIDER_ERROR / timeout ---
+
+test("PROVIDER_ERROR não incrementa o contador", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmProviderError(false),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-provider-error", text: "algo complexo" });
+  assert.equal(result.policy.misunderstandingCountAfter, 0);
+  assert.equal(result.policy.technicalFailure, true);
+});
+
+test("timeout (PROVIDER_ERROR retryable) não incrementa o contador nem dispara handoff", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    maxMisunderstandings: 1,
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmProviderError(true),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-timeout", text: "algo complexo" });
+  assert.equal(result.policy.handoffTriggered, false);
+  assert.equal(result.sessionAfter.underHumanHandoff, false);
+});
+
+test("PROVIDER_ERROR não registra o messageId — retry do mesmo id chama o provider de novo", async () => {
+  let calls = 0;
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => { calls += 1; return llmProviderError(true); },
+  });
+  await textService.processText({ channel: CH, contactId: "llm-provider-no-mark", messageId: "retry-1", text: "algo complexo" });
+  const sessionKey = buildAgentSessionKey(CH, "llm-provider-no-mark");
+  assert.equal(sessionStore.hasProcessedMessage(sessionKey, "retry-1"), false);
+  await textService.processText({ channel: CH, contactId: "llm-provider-no-mark", messageId: "retry-1", text: "algo complexo" });
+  assert.equal(calls, 2);
+});
+
+test("usuário recebe mensagem segura de indisponibilidade temporária, sem mencionar IA/modelo/provider", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmProviderError(false),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-provider-message", text: "algo complexo" });
+  assert.match(result.messages[0]!.text, /Não consegui processar sua mensagem agora/);
+  assert.doesNotMatch(result.messages[0]!.text, /intelig[êe]ncia artificial|modelo|provider|timeout|api/i);
+});
+
+// --- config ---
+
+test("llmMode inválido é rejeitado na criação do service", () => {
+  assert.throws(() => makeStack({ llmMode: "ALWAYS" as never }), TextConversationServiceError);
+});
+
+test("maxLlmInputLength abaixo do mínimo é rejeitado na criação do service", () => {
+  assert.throws(() => makeStack({ maxLlmInputLength: 10 }), TextConversationServiceError);
+});
+
+test("maxLlmInputLength acima do máximo é rejeitado na criação do service", () => {
+  assert.throws(() => makeStack({ maxLlmInputLength: 20_000 }), TextConversationServiceError);
+});
+
+test("texto acima de maxLlmInputLength não chama o LLM", async () => {
+  let called = false;
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    maxLlmInputLength: 50,
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => { called = true; return llmMatched([{ type: "SHOW_MENU" }]); },
+  });
+  await textService.processText({ channel: CH, contactId: "llm-too-long", text: "x".repeat(51) });
+  assert.equal(called, false);
 });
