@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { renderConversationResult, renderConversationPresentation } from "../src/agent/renderer.ts";
+import { renderConversationResult, renderConversationPresentation, renderTextConversationPolicyMessage } from "../src/agent/renderer.ts";
 import type { AgentConversationResult } from "../src/agent/conversation.types.ts";
 import type { AgentConversationPresentation, AgentPresentationContext } from "../src/agent/presentation.ts";
 
@@ -297,6 +297,13 @@ test("renderConversationPresentation sempre devolve array mesmo com contexto vaz
     const messages = renderConversationPresentation(makePresentation(key, {}));
     assert.ok(Array.isArray(messages));
   }
+});
+
+test("renderTextConversationPolicyMessage renderiza POLICY_LLM_TEMPORARILY_UNAVAILABLE", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE" });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]!.metadata?.policyMessageKey, "POLICY_LLM_TEMPORARILY_UNAVAILABLE");
+  assert.match(messages[0]!.text, /Não consegui processar sua mensagem agora/);
 });
 
 test("Renderer não importa Agent Tools", async () => {

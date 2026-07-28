@@ -215,6 +215,9 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "HUMAN_HANDOFF_ACTIVE":
       text = MESSAGE_CATALOG.POLICY_HUMAN_HANDOFF_ACTIVE;
       break;
+    case "POLICY_LLM_TEMPORARILY_UNAVAILABLE":
+      text = MESSAGE_CATALOG.POLICY_LLM_TEMPORARILY_UNAVAILABLE;
+      break;
     default:
       text = MESSAGE_CATALOG.INVALID_ACTION;
   }

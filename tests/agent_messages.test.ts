@@ -78,6 +78,12 @@ test("friendlyMissingFieldLabel devolve o próprio campo quando desconhecido", (
   assert.equal(friendlyMissingFieldLabel("campoNuncaVisto"), "campoNuncaVisto");
 });
 
+test("POLICY_LLM_TEMPORARILY_UNAVAILABLE não menciona IA, modelo, provider, timeout ou API", () => {
+  const text = MESSAGE_CATALOG.POLICY_LLM_TEMPORARILY_UNAVAILABLE;
+  assert.ok(text.length > 0);
+  assert.doesNotMatch(text, /intelig[êe]ncia artificial|modelo|provider|timeout|api/i);
+});
+
 test("catálogo possui um template para todos os messageKeys conhecidos", () => {
   const knownKeys = [
     "WELCOME", "MENU_READY", "CART_READY", "ITEM_ADDED", "ITEM_QUANTITY_UPDATED", "ITEM_REMOVED",

@@ -137,6 +137,8 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   POLICY_AMBIGUOUS: "Encontrei mais de uma possibilidade. Pode especificar melhor?",
   POLICY_HANDOFF_TRIGGERED: "Não consegui concluir o atendimento automaticamente. Vou encaminhar você para uma pessoa.",
   POLICY_HUMAN_HANDOFF_ACTIVE: "Seu atendimento já foi encaminhado para uma pessoa. Aguarde o contato.",
+  POLICY_LLM_TEMPORARILY_UNAVAILABLE:
+    "Não consegui processar sua mensagem agora. Tente novamente em instantes ou peça um atendente.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 };
 
