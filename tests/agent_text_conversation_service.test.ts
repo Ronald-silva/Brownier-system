@@ -7,7 +7,7 @@ import {
 } from "../src/agent/text-conversation.service.ts";
 import { createAgentConversationService } from "../src/agent/conversation.service.ts";
 import { InMemoryAgentSessionStore, buildAgentSessionKey, type AgentSessionStore } from "../src/agent/session.store.ts";
-import { createAgentTools, type AgentDomainStore } from "../src/agent/tools.ts";
+import { createAgentTools, type AgentDomainStore, type AgentTools } from "../src/agent/tools.ts";
 import type { DeterministicInterpretationResult } from "../src/agent/interpreter.types.ts";
 import type { AgentConversationAction } from "../src/agent/conversation.types.ts";
 import type { LlmInterpretationResult } from "../src/agent/llm-interpreter.types.ts";
@@ -756,6 +756,58 @@ test("lote rejeitado no preflight não altera o carrinho e incrementa o contador
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   assert.deepEqual(result.sessionAfter.items, []);
   assert.equal(sessionStore.hasProcessedMessage(sessionKey, "batch-rej-1"), true);
+});
+
+// completedActionCount no caminho FAILED não pode contar a própria ação que
+// falhou como concluída: executeConversationActionBatch() empurra o
+// resultado da ação que falhou em `results` antes de checar se é falha, então
+// `results.length` inclui esse resultado. Simula uma ferramenta que finge
+// que um produto ainda existe durante o preflight (rodada de simulação, 1ª
+// chamada a getProduct para "brownie-ninho") mas já não existe mais na
+// execução real (2ª chamada) — a única forma de o preflight passar e a
+// execução real falhar tecnicamente no meio do lote sem tocar o módulo do
+// Task 4.
+test("lote com falha técnica na execução real (pós-preflight) não conta a ação que falhou como concluída", async () => {
+  const { sessionStore, domainStore } = makeStack();
+  const store2: AgentDomainStore = {
+    ...domainStore,
+    products: [...domainStore.products, { ...domainStore.products[0]!, id: "brownie-ninho", name: "Brownie Ninho" }],
+  };
+  const baseTools = createAgentTools({ store: store2 });
+  let ninhoLookups = 0;
+  const flakyTools: AgentTools = {
+    ...baseTools,
+    getProduct(productId) {
+      if (productId === "brownie-ninho") {
+        ninhoLookups += 1;
+        // 1ª chamada = preflight (simulação, deve "ver" o produto e passar);
+        // 2ª chamada em diante = execução real (produto "sumiu" no meio do lote).
+        if (ninhoLookups >= 2) return null;
+      }
+      return baseTools.getProduct(productId);
+    },
+  };
+  const conversationService = createAgentConversationService({ sessionStore, tools: flakyTools });
+  const contactId = "llm-batch-failed";
+  sessionStore.getOrCreate({ channel: CH, contactId, step: "BUILDING_ORDER" });
+  const batchService = createTextConversationService({
+    conversationService, sessionStore, tools: flakyTools,
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([
+      { type: "ADD_ITEM", productId: "brownie-brigadeiro", quantity: 1 },
+      { type: "ADD_ITEM", productId: "brownie-ninho", quantity: 1 },
+    ]),
+  });
+  const result = await batchService.processText({ channel: CH, contactId, text: "quero um tradicional e um de ninho" });
+  assert.equal(result.execution?.mode, "ACTION_BATCH");
+  assert.equal(result.execution?.preflightPassed, true);
+  assert.equal(result.execution?.failedActionIndex, 1);
+  // A 1ª ação (brigadeiro) de fato foi aplicada antes da falha na 2ª; o
+  // completedActionCount não pode ser 2 (results.length), pois isso contaria
+  // a própria ação que falhou (índice 1) como concluída.
+  assert.equal(result.execution?.completedActionCount, 1);
+  assert.equal(result.policy.technicalFailure, true);
 });
 
 // --- LLM fallback: NOT_UNDERSTOOD / AMBIGUOUS / REJECTED ---

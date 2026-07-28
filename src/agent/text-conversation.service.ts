@@ -486,7 +486,13 @@ export function createTextConversationService(
             execution: {
               mode: "ACTION_BATCH",
               actionCount: llmOutcome.actions.length,
-              completedActionCount: batchResult.results.length,
+              // `batchResult.results.length` inclui o resultado da própria ação
+              // que falhou (executeConversationActionBatch empurra o resultado
+              // antes de checar se é falha), então usar esse length aqui
+              // contaria a ação que falhou como "completada". failedActionIndex
+              // já é o índice (0-based) da ação que falhou, então o número de
+              // ações que de fato tiveram sucesso é exatamente esse índice.
+              completedActionCount: batchResult.failedActionIndex ?? 0,
               preflightPassed: true,
               failedActionIndex: batchResult.failedActionIndex,
             },
