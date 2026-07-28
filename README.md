@@ -62,6 +62,74 @@ Exemplo de entrada (uma linha):
 
 Defina sempre `BF_STORE_PATH` para um arquivo temporário ao experimentar — sem essa variável, o simulador usa o mesmo arquivo de dados que o servidor real (`data/brownies-fortal.demo.json`).
 
+Para inspecionar o contexto público resolvido pela camada de apresentação (nome do produto, opções de pagamento, etc.), rode com `BF_SIMULATOR_DEBUG_CONTEXT=1` — a saída passa a incluir `presentationContext` ao lado de `messages`.
+
+### Interpretador determinístico
+
+Além de receber uma `action` estruturada, o simulador aceita uma segunda forma de entrada com `text` — uma mensagem simples do jeito que um cliente digitaria:
+
+```json
+{"channel": "simulator", "contactId": "cliente-1", "messageId": "m1", "text": "oi"}
+```
+
+```bash
+echo '{"channel":"simulator","contactId":"cliente-1","messageId":"m1","text":"oi"}' |
+BF_STORE_PATH=/tmp/brownier-agent.json npm run agent:simulate
+```
+
+Antes de chegar ao Conversation Engine, esse texto passa pelo **Deterministic Message Interpreter** (`src/agent/deterministic-interpreter.ts`), que:
+
+- entende comandos globais (menu, cancelar, atendente, voltar, recomeçar) e respostas simples e inequívocas — saudação, seleção de produto por número ou nome exato, nome, telefone, retirada, horário e forma de pagamento;
+- decide de forma diferente conforme a etapa atual da sessão (o mesmo texto pode significar coisas diferentes em etapas diferentes);
+- não usa IA nem fuzzy matching — apenas comparações exatas contra listas fechadas de frases e padrões estruturais simples (posição no catálogo, "quantidade x posição", nome exato);
+- nunca inventa uma opção: pedidos de entrega nunca viram `ENTREGA`, horários e formas de pagamento fora da lista atual nunca são aceitos;
+- quando encontra mais de uma interpretação plausível (ex.: dois produtos com nomes que normalizam igual), devolve um resultado `AMBIGUOUS` em vez de escolher a primeira opção;
+- quando não reconhece a mensagem com segurança, devolve `NOT_UNDERSTOOD` — é o ponto em que, no futuro, um interpretador por IA entraria, mas essa etapa não implementa isso.
+
+Só uma interpretação `MATCHED` chega ao Conversation Service; `NOT_UNDERSTOOD` e `AMBIGUOUS` nunca chamam o Engine, nunca criam pedido e nunca executam um candidato de `AMBIGUOUS` automaticamente. O que fazer com cada resultado da interpretação é responsabilidade da camada de política descrita a seguir.
+
+A entrada antiga com `action` continua funcionando sem nenhuma mudança.
+
+### Política de não compreensão (Interpretation Policy)
+
+O **Text Conversation Service** (`src/agent/text-conversation.service.ts`) fica entre o interpretador e o Agent Conversation Service e decide o que fazer com cada resultado da interpretação — o interpretador continua só convertendo texto em `MATCHED`/`NOT_UNDERSTOOD`/`AMBIGUOUS`, nunca decide sozinho o que fazer com isso:
+
+- **`MATCHED`** processado com sucesso pelo Engine zera `misunderstandingCount` — mesmo quando o Engine responde uma validação de domínio (`INVALID_QUANTITY`, `CART_EMPTY`, etc.), pois a intenção foi compreendida. A única exceção é `INVALID_ACTION`: nesse caso o contador é preservado, sem zerar nem incrementar.
+- **`NOT_UNDERSTOOD`** e **`AMBIGUOUS`** incrementam `misunderstandingCount` em 1, sem chamar o Engine e sem executar nenhum candidato de `AMBIGUOUS` automaticamente.
+- Ao atingir o limite configurado (`maxMisunderstandings`), a política dispara encaminhamento humano automático reaproveitando o fluxo oficial `REQUEST_HUMAN` pelo Conversation Service — o carrinho e os dados já coletados (nome, telefone, retirada, horário, pagamento, observações) são preservados, nenhum pedido é criado, e o contador permanece no valor do limite (não é zerado silenciosamente).
+- Enquanto a sessão está em atendimento humano (`underHumanHandoff: true`), mensagens comuns não chamam o interpretador para nada além de checar comandos globais, não incrementam o contador e recebem uma resposta segura informando que o atendimento já foi encaminhado. `RESET_CONVERSATION` (ex.: "recomeçar", "novo pedido") continua funcionando e, ao sair do handoff, a política zera `misunderstandingCount`.
+- Mensagens repetidas (mesmo `messageId`) nunca são reinterpretadas nem contam de novo — nem para compreensão, nem para ambiguidade, nem para o handoff automático.
+- O limite é configurável via `BF_AGENT_MAX_MISUNDERSTANDINGS` (padrão `3`, entre `1` e `10`); um valor inválido impede a inicialização do simulador em vez de cair silenciosamente no padrão.
+- As sessões continuam apenas em memória (`InMemoryAgentSessionStore`) — reiniciar o simulador (ou o processo) descarta toda a política acumulada.
+
+```bash
+BF_STORE_PATH=/tmp/brownies-sim.json BF_AGENT_MAX_MISUNDERSTANDINGS=3 npm run agent:simulate
+```
+
+Esta etapa não implementa IA nem integração com WhatsApp — apenas a política de contagem/handoff sobre o interpretador determinístico já existente.
+
+### Camada de apresentação do agente
+
+O Conversation Engine devolve só resultado estruturado (`messageKey` + `data` + sessão), sem texto de atendimento. Antes de virar texto, esse resultado passa por duas camadas:
+
+- **Presentation Context Builder** (`src/agent/presentation.ts`) — combina o resultado, a sessão e as Agent Tools para resolver dados públicos que o Engine não carrega em toda transição (nome do negócio, nome do produto pelo `productId`, opções de pagamento e horários de retirada atuais, resumo do carrinho). É a única camada que consulta Tools para fins visuais.
+- **Renderer** (`src/agent/renderer.ts`) — usa somente `presentation.context` e o Message Catalog (`src/agent/messages.ts`) para produzir `AgentChatMessage[]`. Não importa Agent Tools nem conhece o domínio.
+
+O simulador chama `buildConversationPresentation()` seguido de `renderConversationPresentation()` após cada `processAction()`.
+
+### Interpretador LLM — infraestrutura
+
+`src/agent/llm-interpreter.ts`, `llm-prompt.ts` e `llm-output-validator.ts` implementam a infraestrutura de um interpretador por IA, pensado para ser usado no futuro apenas quando o Deterministic Interpreter devolver `NOT_UNDERSTOOD`/`AMBIGUOUS` em cenários elegíveis (mensagens naturais mais complexas, como "quero dois brownies tradicionais e um de ninho").
+
+Pontos importantes desta etapa:
+
+- **Ainda não há provider real.** `LlmInterpreterProvider` é uma interface injetável (`generateStructuredOutput(request): Promise<unknown>`), independente de OpenAI/Anthropic/Gemini ou qualquer SDK — nenhum deles foi instalado. Os testes usam apenas um `FakeLlmProvider` local.
+- **Toda saída passa por validação local antes de virar ação.** `parseLlmOutput`/`validateLlmOutput` (`src/agent/llm-output-validator.ts`) usam só `JSON.parse` (nunca `eval`/`Function`) e comparam a proposta do provider contra uma allowlist de ações e contra os dados reais de `context` — nada do que o provider afirma é aceito por si só.
+- **Somente ações já existentes no contrato real podem ser retornadas** (`AgentConversationAction`), classificadas e restritas por etapa da conversa (ex.: `CONFIRM_ORDER` só é aceito em `AWAITING_CONFIRMATION`, e nunca combinado com outras alterações no mesmo lote).
+- **Produtos, horários e formas de pagamento precisam existir no contexto público informado** — `productId`/`productName` só resolvem por correspondência exata (nunca fuzzy, nunca a primeira opção em caso de ambiguidade), `pickupTime` só aceita valores exatamente presentes em `pickupSlots` (com a única normalização seed seguro "19h" → "19:00", quando "19:00" já existe na lista), e `paymentMethod` só aceita o valor canônico de `paymentOptions`. Pedidos de entrega (`ENTREGA`/`DELIVERY`) nunca são aceitos.
+- **Nenhuma criação de pedido ocorre nesta camada** — o LLM Interpreter não importa Agent Tools, Orders, Session Store nem calcula preço; ele só produz `AgentConversationAction[]` já validadas, que ainda precisariam passar pelo Conversation Service e pelo Engine (fluxo oficial, inalterado).
+- **A integração com a Text Conversation Service/Interpretation Policy é uma etapa futura** — esta etapa não altera `text-conversation.service.ts`, não é chamada pelo simulador, e não decide quando o LLM deve ser acionado.
+
 ## Arquitetura
 
 O Express serve a API e o Vite em desenvolvimento. O catálogo, as configurações e os pedidos são persistidos em JSON para a demonstração local. A regra de preço fica em `src/lib/pricing.ts` e é executada novamente no servidor antes de salvar qualquer pedido; valores enviados pelo navegador são ignorados.

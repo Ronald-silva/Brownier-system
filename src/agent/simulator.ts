@@ -9,6 +9,9 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "../lib/store.ts"
 import { createAgentTools, type AgentDomainStore } from "./tools.ts";
 import { InMemoryAgentSessionStore, buildAgentSessionKey } from "./session.store.ts";
 import { createAgentConversationService, type AgentConversationServiceResult } from "./conversation.service.ts";
+import { buildConversationPresentation } from "./presentation.ts";
+import { renderConversationPresentation } from "./renderer.ts";
+import { createTextConversationService, TextConversationServiceError } from "./text-conversation.service.ts";
 
 // Lista pequena e explícita das ações estruturadas aceitas pelo Conversation
 // Engine (src/agent/conversation.types.ts). Mantida aqui só para validação
@@ -47,6 +50,7 @@ export type ParsedSimulatorLine =
       messageId?: string;
       action: { type: string; [key: string]: unknown };
     }
+  | { kind: "text"; channel: string; contactId: string; messageId?: string; text: string }
   | { kind: "command"; command: "GET_SESSION"; channel: string; contactId: string };
 
 function invalidInput(message: string): SimulatorErrorResponse {
@@ -88,15 +92,36 @@ export function parseSimulatorLine(raw: string): { ok: true; value: ParsedSimula
   if (typeof obj.contactId !== "string" || obj.contactId.trim().length === 0) {
     return invalidInput("contactId é obrigatório.");
   }
+  if (obj.messageId !== undefined && typeof obj.messageId !== "string") {
+    return invalidInput("messageId, quando informado, deve ser uma string.");
+  }
+
+  // Modo textual: entrada com `text` é interpretada pelo Deterministic
+  // Message Interpreter antes de virar uma AgentConversationAction — nunca
+  // é a action estruturada em si (esse continua sendo o modo `action`
+  // abaixo, inalterado).
+  if (typeof obj.text === "string") {
+    if (obj.text.trim().length === 0) {
+      return invalidInput("text não pode ser vazio.");
+    }
+    return {
+      ok: true,
+      value: {
+        kind: "text",
+        channel: obj.channel,
+        contactId: obj.contactId,
+        messageId: obj.messageId as string | undefined,
+        text: obj.text,
+      },
+    };
+  }
+
   if (typeof obj.action !== "object" || obj.action === null) {
-    return invalidInput("action é obrigatória.");
+    return invalidInput("action ou text é obrigatório.");
   }
   const action = obj.action as Record<string, unknown>;
   if (typeof action.type !== "string" || !KNOWN_ACTION_TYPES.has(action.type)) {
     return invalidInput(`action.type desconhecido ou ausente: ${String(action.type)}`);
-  }
-  if (obj.messageId !== undefined && typeof obj.messageId !== "string") {
-    return invalidInput("messageId, quando informado, deve ser uma string.");
   }
 
   return {
@@ -147,6 +172,18 @@ export function buildSeedDomainStore(): AgentDomainStore {
   };
 }
 
+// Limite de misunderstandingCount usado pelo Interpretation Policy
+// (src/agent/text-conversation.service.ts) antes de encaminhar a conversa
+// para atendimento humano automaticamente. Opcional — o padrão (3) e os
+// limites (1 a 10) são validados pelo próprio Text Conversation Service na
+// criação; aqui só convertemos a variável de ambiente para número, sem
+// fallback silencioso para texto inválido.
+function resolveMaxMisunderstandingsFromEnv(): number | undefined {
+  const raw = process.env.BF_AGENT_MAX_MISUNDERSTANDINGS?.trim();
+  if (!raw) return undefined;
+  return Number(raw);
+}
+
 async function runSimulator(): Promise<void> {
   if (!process.env.BF_STORE_PATH?.trim()) {
     console.log(
@@ -171,6 +208,28 @@ async function runSimulator(): Promise<void> {
   const sessionStore = new InMemoryAgentSessionStore();
   const service = createAgentConversationService({ sessionStore, tools });
 
+  let textService;
+  try {
+    textService = createTextConversationService({
+      conversationService: service,
+      sessionStore,
+      tools,
+      maxMisunderstandings: resolveMaxMisunderstandingsFromEnv(),
+    });
+  } catch (error) {
+    console.log(
+      JSON.stringify({
+        ok: false,
+        error: {
+          code: error instanceof TextConversationServiceError ? error.code : "SIMULATOR_TECHNICAL_ERROR",
+          message: error instanceof Error ? error.message : "Erro técnico inesperado ao configurar o simulador.",
+        },
+      }),
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
   for await (const rawLine of rl) {
@@ -191,6 +250,37 @@ async function runSimulator(): Promise<void> {
         continue;
       }
 
+      if (parsed.value.kind === "text") {
+        const { channel, contactId, messageId, text } = parsed.value;
+
+        // Toda a política de interpretação (contagem de não compreensão,
+        // deduplicação, encaminhamento humano automático) mora no Text
+        // Conversation Service — o simulador é só o adaptador de stdin/stdout,
+        // sem duplicar nenhuma dessas regras aqui.
+        const textResult = textService.processText({ channel, contactId, messageId, text });
+
+        if (!textResult.duplicateMessage && textResult.result?.event === "ORDER_CREATED") {
+          await saveStoreFile(storePath, domainStore);
+        }
+
+        const debugContext = Boolean(process.env.BF_SIMULATOR_DEBUG_CONTEXT?.trim());
+        let presentationContext: unknown;
+        if (debugContext && textResult.result) {
+          presentationContext = buildConversationPresentation({
+            result: textResult.result,
+            session: textResult.sessionAfter,
+            tools,
+          }).context;
+        }
+        console.log(
+          JSON.stringify({
+            ...textResult,
+            ...(presentationContext !== undefined ? { presentationContext } : {}),
+          }),
+        );
+        continue;
+      }
+
       const { channel, contactId, messageId, action } = parsed.value;
       const serviceResult: AgentConversationServiceResult = service.processAction({
         channel,
@@ -203,7 +293,20 @@ async function runSimulator(): Promise<void> {
         await saveStoreFile(storePath, domainStore);
       }
 
-      console.log(JSON.stringify(serviceResult));
+      const presentation = buildConversationPresentation({
+        result: serviceResult.result,
+        session: serviceResult.sessionAfter,
+        tools,
+      });
+      const messages = renderConversationPresentation(presentation);
+      const debugContext = Boolean(process.env.BF_SIMULATOR_DEBUG_CONTEXT?.trim());
+      console.log(
+        JSON.stringify({
+          ...serviceResult,
+          messages,
+          ...(debugContext ? { presentationContext: presentation.context } : {}),
+        }),
+      );
     } catch (error) {
       console.error(error);
       console.log(
