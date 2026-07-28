@@ -206,21 +206,13 @@ test("CONFIRM_ORDER com messageId diferente após o pedido já criado não gera 
 test("erro técnico do engine não registra messageId nem persiste sessão parcial", () => {
   const { service, sessionStore } = makeService({ generateOrderIdempotencyKey: () => "chave com espaço inválida" });
   const { channel, contactId } = readySessionPayload();
-  service.processAction({ channel, contactId, action: START });
-  service.processAction({ channel, contactId, action: { type: "ADD_ITEM", productId: "p1", quantity: 2 } });
-  service.processAction({ channel, contactId, action: { type: "FINISH_CART" } });
-  service.processAction({ channel, contactId, action: { type: "SET_CUSTOMER_NAME", customerName: "Maria Silva" } });
-  service.processAction({ channel, contactId, action: { type: "SET_CUSTOMER_PHONE", customerPhone: "85999998888" } });
-  service.processAction({ channel, contactId, action: { type: "SET_FULFILLMENT", fulfillmentType: "RETIRADA" } });
-  service.processAction({ channel, contactId, action: { type: "SET_PICKUP_TIME", pickupTime: "18:00" } });
-  service.processAction({ channel, contactId, action: { type: "SKIP_CUSTOMER_NOTES" } });
-  const beforeConfirm = service.processAction({ channel, contactId, action: { type: "SET_PAYMENT_METHOD", paymentMethod: "PIX" } });
+  const sessionKey = advanceToAwaitingConfirmation(service);
   assert.throws(
     () => service.processAction({ channel, contactId, action: { type: "CONFIRM_ORDER" }, messageId: "confirm-x" }),
     AgentConversationError,
   );
-  assert.equal(sessionStore.hasProcessedMessage(beforeConfirm.sessionKey, "confirm-x"), false);
-  const stored = sessionStore.get(beforeConfirm.sessionKey);
+  assert.equal(sessionStore.hasProcessedMessage(sessionKey, "confirm-x"), false);
+  const stored = sessionStore.get(sessionKey);
   assert.equal(stored?.step, "AWAITING_CONFIRMATION");
   assert.equal(stored?.createdOrderId, undefined);
 });
