@@ -8,6 +8,7 @@
 // implementadas pelo Conversation Service/Engine — apenas orquestra.
 import type { AgentSession } from "./session.types.ts";
 import type { AgentSessionStore } from "./session.store.ts";
+import { buildAgentSessionKey } from "./session.store.ts";
 import type { AgentTools } from "./tools.ts";
 import type { AgentConversationAction, AgentConversationResult } from "./conversation.types.ts";
 import type { AgentConversationService } from "./conversation.service.ts";
@@ -272,13 +273,37 @@ export function createTextConversationService(
     deps.interpretWithLlm ?? (deps.llmInterpreter ? input => deps.llmInterpreter!.interpret(input) : undefined);
   const llmEnabled = llmMode === "FALLBACK" && typeof interpretWithLlm === "function";
 
+  const sessionLocks = new Map<string, Promise<unknown>>();
+
+  // Mutex local por sessionKey — só serializa chamadas dentro deste
+  // processo/instância (Map em closure, não é singleton global nem promete
+  // proteção distribuída). Uma falha em fn() não trava a fila: a próxima
+  // aquisição roda normalmente porque `tracked` engole o erro só para fins
+  // de encadeamento, enquanto `run` (devolvido ao chamador) preserva o erro.
+  // `run.finally(...)` devolve uma nova promise que adota a rejeição de
+  // `run` — como `run` já é entregue (e tratado) pelo chamador, essa segunda
+  // promise fica sem handler próprio e o Node reporta unhandledRejection se
+  // não for silenciada aqui; o `.catch(() => {})` no fim só evita esse aviso
+  // espúrio, sem alterar o valor/erro devolvido por `run`.
+  function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = sessionLocks.get(key) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    const tracked = run.catch(() => {});
+    sessionLocks.set(key, tracked);
+    run.finally(() => {
+      if (sessionLocks.get(key) === tracked) sessionLocks.delete(key);
+    }).catch(() => {});
+    return run;
+  }
+
   return {
     async processText(input: ProcessTextInput): Promise<ProcessTextResult> {
       const { channel, contactId, messageId, text } = input;
       validateMessageId(messageId);
+      const sessionKey = buildAgentSessionKey(channel, contactId);
 
+      return withSessionLock(sessionKey, async () => {
       const sessionBeforeRaw = sessionStore.getOrCreate({ channel, contactId });
-      const sessionKey = sessionBeforeRaw.sessionKey;
       const sessionBefore = structuredClone(sessionBeforeRaw);
       const misunderstandingCountBefore = sessionBefore.misunderstandingCount;
 
@@ -572,6 +597,7 @@ export function createTextConversationService(
             }
           : {}),
       };
+      });
     },
   };
 }
