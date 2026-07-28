@@ -124,19 +124,19 @@ const CH = "simulator";
 
 // --- 1-6: configuração de maxMisunderstandings ---
 
-test("limite padrão de não compreensões é 3", () => {
+test("limite padrão de não compreensões é 3", async () => {
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "cfg-default";
-  textService.processText({ channel: CH, contactId, text: "a" });
-  textService.processText({ channel: CH, contactId, text: "b" });
-  const third = textService.processText({ channel: CH, contactId, text: "c" });
+  await textService.processText({ channel: CH, contactId, text: "a" });
+  await textService.processText({ channel: CH, contactId, text: "b" });
+  const third = await textService.processText({ channel: CH, contactId, text: "c" });
   assert.equal(third.policy.handoffTriggered, true);
   assert.equal(third.policy.misunderstandingCountAfter, 3);
 });
 
-test("limite customizado funciona", () => {
+test("limite customizado funciona", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
-  const result = textService.processText({ channel: CH, contactId: "cfg-custom", text: "a" });
+  const result = await textService.processText({ channel: CH, contactId: "cfg-custom", text: "a" });
   assert.equal(result.policy.handoffTriggered, true);
   assert.equal(result.policy.misunderstandingCountAfter, 1);
 });
@@ -170,46 +170,46 @@ test("dependências obrigatórias ausentes lançam erro técnico", () => {
 
 // --- 7-13: MATCHED ---
 
-test("MATCHED chama o Conversation Service e devolve o resultado do Engine", () => {
+test("MATCHED chama o Conversation Service e devolve o resultado do Engine", async () => {
   const { textService } = makeStack();
-  const result = textService.processText({ channel: CH, contactId: "matched-1", text: "oi" });
+  const result = await textService.processText({ channel: CH, contactId: "matched-1", text: "oi" });
   assert.equal(result.interpretation?.status, "MATCHED");
   assert.equal(result.result?.event, "WELCOME");
 });
 
-test("MATCHED processado zera misunderstandingCount", () => {
+test("MATCHED processado zera misunderstandingCount", async () => {
   const { sessionStore } = makeStack();
   const contactId = "matched-reset";
   const { textService: failer } = makeStack({ sessionStore, maxMisunderstandings: 5, interpretMessage: () => notUnderstood("GENERIC") });
-  failer.processText({ channel: CH, contactId, text: "a" });
-  const afterFailures = failer.processText({ channel: CH, contactId, text: "b" });
+  await failer.processText({ channel: CH, contactId, text: "a" });
+  const afterFailures = await failer.processText({ channel: CH, contactId, text: "b" });
   assert.equal(afterFailures.policy.misunderstandingCountAfter, 2);
 
   const { textService: realService } = makeStack({ sessionStore });
-  const matched = realService.processText({ channel: CH, contactId, text: "oi" });
+  const matched = await realService.processText({ channel: CH, contactId, text: "oi" });
   assert.equal(matched.policy.counterReset, true);
   assert.equal(matched.policy.misunderstandingCountAfter, 0);
   assert.equal(matched.sessionAfter.misunderstandingCount, 0);
 });
 
-test("MATCHED com misunderstandingCount já zero não gera update de sessão desnecessário", () => {
+test("MATCHED com misunderstandingCount já zero não gera update de sessão desnecessário", async () => {
   const base = new InMemoryAgentSessionStore();
   const { store, state } = wrapCountingUpdates(base);
   const { textService } = makeStack({ sessionStore: store });
   const contactId = "matched-no-extra-update";
-  textService.processText({ channel: CH, contactId, text: "oi" });
+  await textService.processText({ channel: CH, contactId, text: "oi" });
   // Uma única chamada a update(): a persistência do Engine feita pelo
   // Conversation Service. Nenhuma chamada extra da política, pois o
   // contador já estava em zero.
   assert.equal(state.calls, 1);
 });
 
-test("MATCHED com validação de domínio inválida (ex.: INVALID_QUANTITY) ainda zera o contador", () => {
+test("MATCHED com validação de domínio inválida (ex.: INVALID_QUANTITY) ainda zera o contador", async () => {
   const { sessionStore } = makeStack();
   const contactId = "matched-domain-invalid";
   const { textService: failer } = makeStack({ sessionStore, maxMisunderstandings: 5, interpretMessage: () => notUnderstood("GENERIC") });
-  failer.processText({ channel: CH, contactId, text: "a" });
-  failer.processText({ channel: CH, contactId, text: "b" });
+  await failer.processText({ channel: CH, contactId, text: "a" });
+  await failer.processText({ channel: CH, contactId, text: "b" });
 
   const sessionKey = buildAgentSessionKey(CH, contactId);
   assert.equal(sessionStore.get(sessionKey)?.misunderstandingCount, 2);
@@ -229,13 +229,13 @@ test("MATCHED com validação de domínio inválida (ex.: INVALID_QUANTITY) aind
     }),
   });
 
-  const result = withInvalidQty.processText({ channel: CH, contactId, text: "0 brownie" });
+  const result = await withInvalidQty.processText({ channel: CH, contactId, text: "0 brownie" });
   assert.equal(result.result?.messageKey, "INVALID_QUANTITY");
   assert.equal(result.policy.counterReset, true);
   assert.equal(result.policy.misunderstandingCountAfter, 0);
 });
 
-test("MATCHED resultando em INVALID_ACTION preserva o contador atual", () => {
+test("MATCHED resultando em INVALID_ACTION preserva o contador atual", async () => {
   const { sessionStore } = makeStack();
   const contactId = "matched-invalid-action";
   const { textService: bumpTwice } = makeStack({
@@ -243,8 +243,8 @@ test("MATCHED resultando em INVALID_ACTION preserva o contador atual", () => {
     maxMisunderstandings: 5,
     interpretMessage: () => notUnderstood("GENERIC"),
   });
-  bumpTwice.processText({ channel: CH, contactId, text: "a" });
-  bumpTwice.processText({ channel: CH, contactId, text: "b" });
+  await bumpTwice.processText({ channel: CH, contactId, text: "a" });
+  await bumpTwice.processText({ channel: CH, contactId, text: "b" });
 
   const { textService: sendGoBack } = makeStack({
     sessionStore,
@@ -257,14 +257,14 @@ test("MATCHED resultando em INVALID_ACTION preserva o contador atual", () => {
       normalizedText: "voltar",
     }),
   });
-  const result = sendGoBack.processText({ channel: CH, contactId, text: "voltar" });
+  const result = await sendGoBack.processText({ channel: CH, contactId, text: "voltar" });
   assert.equal(result.result?.messageKey, "INVALID_ACTION");
   assert.equal(result.policy.counterReset, false);
   assert.equal(result.policy.misunderstandingCountAfter, 2);
   assert.equal(result.sessionAfter.misunderstandingCount, 2);
 });
 
-test("erro técnico do Engine não zera nem altera o contador e propaga o erro", () => {
+test("erro técnico do Engine não zera nem altera o contador e propaga o erro", async () => {
   const { sessionStore, tools } = makeStack();
   const contactId = "matched-technical-error";
   const conversationService = createAgentConversationService({
@@ -286,7 +286,7 @@ test("erro técnico do Engine não zera nem altera o contador e propaga o erro",
     },
   });
   for (const text of ["oi", "1", "finalizar", "maria", "fone"]) {
-    textService.processText({ channel: CH, contactId, text });
+    await textService.processText({ channel: CH, contactId, text });
   }
   // Pula direto pra confirmação simplificada: seta pickupTime/notes/payment via ações diretas no engine.
   const sessionKey = buildAgentSessionKey(CH, contactId);
@@ -306,17 +306,17 @@ test("erro técnico do Engine não zera nem altera o contador e propaga o erro",
     interpretMessage: () => ({ status: "MATCHED", action: { type: "CONFIRM_ORDER" }, confidence: 1, source: "T", normalizedText: "confirmar" }),
   });
   const before = sessionStore.get(sessionKey)?.misunderstandingCount;
-  assert.throws(() => confirmService.processText({ channel: CH, contactId, messageId: "confirm-x", text: "confirmar" }));
+  await assert.rejects(() => confirmService.processText({ channel: CH, contactId, messageId: "confirm-x", text: "confirmar" }));
   assert.equal(sessionStore.get(sessionKey)?.misunderstandingCount, before);
   assert.equal(sessionStore.hasProcessedMessage(sessionKey, "confirm-x"), false);
 });
 
-test("MATCHED duplicado (mesmo messageId) não processa novamente", () => {
+test("MATCHED duplicado (mesmo messageId) não processa novamente", async () => {
   const { textService, domainStore } = makeStack();
   const contactId = "matched-dup";
-  textService.processText({ channel: CH, contactId, messageId: "m1", text: "oi" });
+  await textService.processText({ channel: CH, contactId, messageId: "m1", text: "oi" });
   const before = JSON.parse(JSON.stringify(domainStore));
-  const replay = textService.processText({ channel: CH, contactId, messageId: "m1", text: "oi" });
+  const replay = await textService.processText({ channel: CH, contactId, messageId: "m1", text: "oi" });
   assert.equal(replay.duplicateMessage, true);
   assert.deepEqual(domainStore, before);
   assert.equal(replay.messages.length, 0);
@@ -324,111 +324,111 @@ test("MATCHED duplicado (mesmo messageId) não processa novamente", () => {
 
 // --- 14-20: NOT_UNDERSTOOD ---
 
-test("primeira falha incrementa misunderstandingCount para 1", () => {
+test("primeira falha incrementa misunderstandingCount para 1", async () => {
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
-  const result = textService.processText({ channel: CH, contactId: "nu-first", text: "???" });
+  const result = await textService.processText({ channel: CH, contactId: "nu-first", text: "???" });
   assert.equal(result.policy.misunderstandingCountBefore, 0);
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   assert.equal(result.policyResult?.messageKey, "INTERPRETATION_NOT_UNDERSTOOD");
 });
 
-test("segunda falha incrementa misunderstandingCount para 2", () => {
+test("segunda falha incrementa misunderstandingCount para 2", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 5, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "nu-second";
-  textService.processText({ channel: CH, contactId, text: "a" });
-  const second = textService.processText({ channel: CH, contactId, text: "b" });
+  await textService.processText({ channel: CH, contactId, text: "a" });
+  const second = await textService.processText({ channel: CH, contactId, text: "b" });
   assert.equal(second.policy.misunderstandingCountAfter, 2);
 });
 
-test("falha sem messageId ainda incrementa o contador", () => {
+test("falha sem messageId ainda incrementa o contador", async () => {
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
-  const result = textService.processText({ channel: CH, contactId: "nu-no-id", text: "???" });
+  const result = await textService.processText({ channel: CH, contactId: "nu-no-id", text: "???" });
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   assert.deepEqual(result.sessionAfter.processedMessageIds, []);
 });
 
-test("falha com messageId registra o id como processado", () => {
+test("falha com messageId registra o id como processado", async () => {
   const { textService, sessionStore } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "nu-with-id";
-  const result = textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" });
+  const result = await textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" });
   const sessionKey = buildAgentSessionKey(CH, contactId);
   assert.equal(sessionStore.hasProcessedMessage(sessionKey, "u1"), true);
   assert.deepEqual(result.sessionAfter.processedMessageIds, ["u1"]);
 });
 
-test("falha duplicada (mesmo messageId) não incrementa o contador de novo", () => {
+test("falha duplicada (mesmo messageId) não incrementa o contador de novo", async () => {
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "nu-dup";
-  textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" });
-  const replay = textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" });
+  await textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" });
+  const replay = await textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" });
   assert.equal(replay.duplicateMessage, true);
   assert.equal(replay.policy.misunderstandingCountAfter, 1);
   assert.equal(replay.messages.length, 0);
 });
 
-test("falha não chama o Engine (sessão de negócio não muda de etapa)", () => {
+test("falha não chama o Engine (sessão de negócio não muda de etapa)", async () => {
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
-  const result = textService.processText({ channel: CH, contactId: "nu-no-engine", text: "???" });
+  const result = await textService.processText({ channel: CH, contactId: "nu-no-engine", text: "???" });
   assert.equal(result.result, undefined);
   assert.equal(result.sessionAfter.step, "START");
   assert.deepEqual(result.sessionAfter.items, []);
 });
 
-test("sugestões públicas de NOT_UNDERSTOOD são preservadas e deduplicadas na mensagem", () => {
+test("sugestões públicas de NOT_UNDERSTOOD são preservadas e deduplicadas na mensagem", async () => {
   const { textService } = makeStack({
     interpretMessage: () => notUnderstood("INVALID_PAYMENT_OPTION", ["PIX", "DINHEIRO", "PIX", "  "]),
   });
-  const result = textService.processText({ channel: CH, contactId: "nu-suggestions", text: "bitcoin" });
+  const result = await textService.processText({ channel: CH, contactId: "nu-suggestions", text: "bitcoin" });
   assert.deepEqual(result.policyResult?.data?.suggestions, ["PIX", "DINHEIRO"]);
   assert.match(result.messages[0].text, /Escolha uma destas opções: PIX, DINHEIRO\./);
 });
 
-test("sugestões públicas são limitadas a 5 opções", () => {
+test("sugestões públicas são limitadas a 5 opções", async () => {
   const many = ["A", "B", "C", "D", "E", "F", "G"];
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("INVALID_PAYMENT_OPTION", many) });
-  const result = textService.processText({ channel: CH, contactId: "nu-suggestions-cap", text: "x" });
+  const result = await textService.processText({ channel: CH, contactId: "nu-suggestions-cap", text: "x" });
   assert.equal((result.policyResult?.data?.suggestions as string[]).length, 5);
 });
 
 // --- 21-25: AMBIGUOUS ---
 
-test("AMBIGUOUS incrementa o contador", () => {
+test("AMBIGUOUS incrementa o contador", async () => {
   const { textService } = makeStack({ interpretMessage: () => ambiguous("AMBIGUOUS_PRODUCT") });
-  const result = textService.processText({ channel: CH, contactId: "amb-count", text: "brownie" });
+  const result = await textService.processText({ channel: CH, contactId: "amb-count", text: "brownie" });
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   assert.equal(result.policyResult?.messageKey, "INTERPRETATION_AMBIGUOUS");
 });
 
-test("AMBIGUOUS não executa candidatos nem expõe productId na mensagem", () => {
+test("AMBIGUOUS não executa candidatos nem expõe productId na mensagem", async () => {
   const { textService } = makeStack({ interpretMessage: () => ambiguous("AMBIGUOUS_PRODUCT", true) });
-  const result = textService.processText({ channel: CH, contactId: "amb-no-exec", text: "brownie" });
+  const result = await textService.processText({ channel: CH, contactId: "amb-no-exec", text: "brownie" });
   assert.equal(result.result, undefined);
   assert.deepEqual(result.sessionAfter.items, []);
   assert.doesNotMatch(result.messages[0].text, /brownie-secreto/);
 });
 
-test("AMBIGUOUS não chama o Engine", () => {
+test("AMBIGUOUS não chama o Engine", async () => {
   const { textService } = makeStack({ interpretMessage: () => ambiguous("AMBIGUOUS_PRODUCT") });
-  const result = textService.processText({ channel: CH, contactId: "amb-no-engine", text: "brownie" });
+  const result = await textService.processText({ channel: CH, contactId: "amb-no-engine", text: "brownie" });
   assert.equal(result.result, undefined);
 });
 
-test("AMBIGUOUS duplicado não incrementa novamente", () => {
+test("AMBIGUOUS duplicado não incrementa novamente", async () => {
   const { textService } = makeStack({ interpretMessage: () => ambiguous("AMBIGUOUS_PRODUCT") });
   const contactId = "amb-dup";
-  textService.processText({ channel: CH, contactId, messageId: "a1", text: "brownie" });
-  const replay = textService.processText({ channel: CH, contactId, messageId: "a1", text: "brownie" });
+  await textService.processText({ channel: CH, contactId, messageId: "a1", text: "brownie" });
+  const replay = await textService.processText({ channel: CH, contactId, messageId: "a1", text: "brownie" });
   assert.equal(replay.duplicateMessage, true);
   assert.equal(replay.policy.misunderstandingCountAfter, 1);
 });
 
 // --- 26-36: handoff automático ---
 
-test("limite atingido dispara REQUEST_HUMAN pelo Conversation Service", () => {
+test("limite atingido dispara REQUEST_HUMAN pelo Conversation Service", async () => {
   const { textService, sessionStore } = makeStack({ maxMisunderstandings: 2, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-basic";
-  textService.processText({ channel: CH, contactId, text: "a" });
-  const second = textService.processText({ channel: CH, contactId, text: "b" });
+  await textService.processText({ channel: CH, contactId, text: "a" });
+  const second = await textService.processText({ channel: CH, contactId, text: "b" });
   assert.equal(second.policy.handoffTriggered, true);
   assert.equal(second.sessionAfter.underHumanHandoff, true);
   assert.equal(second.sessionAfter.step, "HUMAN_HANDOFF");
@@ -436,62 +436,62 @@ test("limite atingido dispara REQUEST_HUMAN pelo Conversation Service", () => {
   assert.equal(sessionStore.get(sessionKey)?.step, "HUMAN_HANDOFF");
 });
 
-test("handoff automático preserva o carrinho e não cria pedido", () => {
+test("handoff automático preserva o carrinho e não cria pedido", async () => {
   const { sessionStore } = makeStack();
   const contactId = "handoff-preserves-cart";
   const { textService: addToCart } = makeStack({ sessionStore });
-  addToCart.processText({ channel: CH, contactId, text: "oi" });
-  addToCart.processText({ channel: CH, contactId, text: "1" });
+  await addToCart.processText({ channel: CH, contactId, text: "oi" });
+  await addToCart.processText({ channel: CH, contactId, text: "1" });
 
   const { textService: failTwice } = makeStack({
     sessionStore,
     maxMisunderstandings: 2,
     interpretMessage: () => notUnderstood("GENERIC"),
   });
-  failTwice.processText({ channel: CH, contactId, text: "a" });
-  const result = failTwice.processText({ channel: CH, contactId, text: "b" });
+  await failTwice.processText({ channel: CH, contactId, text: "a" });
+  const result = await failTwice.processText({ channel: CH, contactId, text: "b" });
 
   assert.equal(result.policy.handoffTriggered, true);
   assert.deepEqual(result.sessionAfter.items, [{ productId: "brownie-brigadeiro", quantity: 1 }]);
   assert.equal(result.sessionAfter.createdOrderId, undefined);
 });
 
-test("contador permanece no valor do limite após o handoff automático", () => {
+test("contador permanece no valor do limite após o handoff automático", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 2, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-count-stays";
-  textService.processText({ channel: CH, contactId, text: "a" });
-  const result = textService.processText({ channel: CH, contactId, text: "b" });
+  await textService.processText({ channel: CH, contactId, text: "a" });
+  const result = await textService.processText({ channel: CH, contactId, text: "b" });
   assert.equal(result.policy.misunderstandingCountAfter, 2);
   assert.equal(result.sessionAfter.misunderstandingCount, 2);
 });
 
-test("mensagem original que disparou o handoff é registrada como processada", () => {
+test("mensagem original que disparou o handoff é registrada como processada", async () => {
   const { textService, sessionStore } = makeStack({ maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-registers-id";
-  textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
+  await textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
   const sessionKey = buildAgentSessionKey(CH, contactId);
   assert.equal(sessionStore.hasProcessedMessage(sessionKey, "trigger-1"), true);
 });
 
-test("replay da mensagem que disparou o handoff não dispara um segundo handoff", () => {
+test("replay da mensagem que disparou o handoff não dispara um segundo handoff", async () => {
   const { textService, sessionStore } = makeStack({ maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-no-double";
-  textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
-  const replay = textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
+  await textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
+  const replay = await textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
   assert.equal(replay.duplicateMessage, true);
   const sessionKey = buildAgentSessionKey(CH, contactId);
   assert.equal(sessionStore.get(sessionKey)?.misunderstandingCount, 1);
   assert.equal(replay.messages.length, 0);
 });
 
-test("falha técnica no handoff automático não finge sucesso e preserva o limite documentado", () => {
+test("falha técnica no handoff automático não finge sucesso e preserva o limite documentado", async () => {
   const base = new InMemoryAgentSessionStore();
   // A 1ª chamada a update() é o incremento do contador (sucesso); a 2ª é a
   // persistência do REQUEST_HUMAN dentro do Conversation Service (falha).
   const broken = wrapUpdateFailingOnCall(base, 2);
   const { textService } = makeStack({ sessionStore: broken, maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-tech-failure";
-  assert.throws(() => textService.processText({ channel: CH, contactId, messageId: "trigger-x", text: "a" }));
+  await assert.rejects(() => textService.processText({ channel: CH, contactId, messageId: "trigger-x", text: "a" }));
   const sessionKey = buildAgentSessionKey(CH, contactId);
   assert.equal(base.get(sessionKey)?.misunderstandingCount, 1);
   assert.equal(base.get(sessionKey)?.underHumanHandoff, false);
@@ -508,59 +508,59 @@ test("falha técnica no handoff automático não finge sucesso e preserva o limi
 // contrato, então usar o interpretador de verdade é o que de fato exercita a
 // política de handoff ativo.
 
-test("mensagem comum durante handoff ativo não chama o Engine nem incrementa o contador", () => {
+test("mensagem comum durante handoff ativo não chama o Engine nem incrementa o contador", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-common";
-  const first = textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  const first = await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
   assert.equal(first.policy.handoffTriggered, true);
 
-  const result = textService.processText({ channel: CH, contactId, text: "qualquer coisa" });
+  const result = await textService.processText({ channel: CH, contactId, text: "qualquer coisa" });
   assert.equal(result.result, undefined);
   assert.equal(result.policy.misunderstandingCountAfter, 1);
   assert.equal(result.policyResult?.messageKey, "HUMAN_HANDOFF_ACTIVE");
   assert.match(result.messages[0].text, /atendimento já foi encaminhado/);
 });
 
-test("RESET_CONVERSATION é permitido durante handoff ativo e sai do handoff", () => {
+test("RESET_CONVERSATION é permitido durante handoff ativo e sai do handoff", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-reset";
-  textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
 
-  const result = textService.processText({ channel: CH, contactId, text: "recomeçar" });
+  const result = await textService.processText({ channel: CH, contactId, text: "recomeçar" });
   assert.equal(result.interpretation?.status, "MATCHED");
   assert.equal(result.sessionAfter.underHumanHandoff, false);
   assert.equal(result.sessionAfter.step, "START");
 });
 
-test("RESET_CONVERSATION durante handoff ativo zera o misunderstandingCount", () => {
+test("RESET_CONVERSATION durante handoff ativo zera o misunderstandingCount", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-reset-zeroes";
-  textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
 
-  const result = textService.processText({ channel: CH, contactId, text: "recomeçar" });
+  const result = await textService.processText({ channel: CH, contactId, text: "recomeçar" });
   assert.equal(result.policy.counterReset, true);
   assert.equal(result.sessionAfter.misunderstandingCount, 0);
 });
 
-test("depois do reset, um novo fluxo pode começar normalmente", () => {
+test("depois do reset, um novo fluxo pode começar normalmente", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-reset-then-flow";
-  textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
-  textService.processText({ channel: CH, contactId, text: "recomeçar" });
+  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "recomeçar" });
 
-  const result = textService.processText({ channel: CH, contactId, text: "oi" });
+  const result = await textService.processText({ channel: CH, contactId, text: "oi" });
   assert.equal(result.interpretation?.status, "MATCHED");
   assert.equal(result.result?.event, "WELCOME");
   assert.equal(result.sessionAfter.step, "BROWSING_MENU");
   assert.equal(result.sessionAfter.misunderstandingCount, 0);
 });
 
-test("REQUEST_HUMAN repetido durante handoff ativo não gera nova alteração", () => {
+test("REQUEST_HUMAN repetido durante handoff ativo não gera nova alteração", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-repeated-human";
-  textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
 
-  const result = textService.processText({ channel: CH, contactId, text: "atendente" });
+  const result = await textService.processText({ channel: CH, contactId, text: "atendente" });
   assert.equal(result.interpretation?.status, "NOT_UNDERSTOOD");
   assert.equal((result.interpretation as { reason?: string }).reason, "HUMAN_HANDOFF_ACTIVE");
   assert.equal(result.sessionAfter.underHumanHandoff, true);
@@ -569,36 +569,36 @@ test("REQUEST_HUMAN repetido durante handoff ativo não gera nova alteração", 
 
 // --- 45-48: persistência e cópias defensivas ---
 
-test("sessionBefore é uma cópia defensiva", () => {
+test("sessionBefore é uma cópia defensiva", async () => {
   const { textService, sessionStore } = makeStack();
   const contactId = "defensive-before";
-  const result = textService.processText({ channel: CH, contactId, text: "oi" });
+  const result = await textService.processText({ channel: CH, contactId, text: "oi" });
   (result.sessionBefore as { step: string }).step = "ORDER_CREATED";
   const stored = sessionStore.get(result.sessionKey);
   assert.notEqual(stored?.step, "ORDER_CREATED");
 });
 
-test("sessionAfter é uma cópia defensiva", () => {
+test("sessionAfter é uma cópia defensiva", async () => {
   const { textService, sessionStore } = makeStack();
   const contactId = "defensive-after";
-  const result = textService.processText({ channel: CH, contactId, text: "oi" });
+  const result = await textService.processText({ channel: CH, contactId, text: "oi" });
   result.sessionAfter.items.push({ productId: "injetado", quantity: 1 });
   const stored = sessionStore.get(result.sessionKey);
   assert.equal(stored?.items.length, 0);
 });
 
-test("falha de persistência do contador não registra o messageId e propaga o erro", () => {
+test("falha de persistência do contador não registra o messageId e propaga o erro", async () => {
   const base = new InMemoryAgentSessionStore();
   const broken = wrapUpdateFailingOnCall(base, 1);
   const { textService } = makeStack({ sessionStore: broken, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "defensive-update-failure";
-  assert.throws(() => textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" }));
+  await assert.rejects(() => textService.processText({ channel: CH, contactId, messageId: "u1", text: "???" }));
   assert.equal(broken.hasProcessedMessage(buildAgentSessionKey(CH, contactId), "u1"), false);
 });
 
-test("messageId vazio é rejeitado com erro técnico controlado", () => {
+test("messageId vazio é rejeitado com erro técnico controlado", async () => {
   const { textService } = makeStack();
-  assert.throws(
+  await assert.rejects(
     () => textService.processText({ channel: CH, contactId: "invalid-message-id", messageId: "   ", text: "oi" }),
     TextConversationServiceError,
   );

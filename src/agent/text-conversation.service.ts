@@ -86,7 +86,7 @@ export type ProcessTextResult = {
 };
 
 export type TextConversationService = {
-  processText(input: ProcessTextInput): ProcessTextResult;
+  processText(input: ProcessTextInput): Promise<ProcessTextResult>;
 };
 
 function validateMessageId(messageId: string | undefined): void {
@@ -163,7 +163,7 @@ export function createTextConversationService(
   const buildInterpreterContext = deps.buildInterpreterContext ?? defaultBuildInterpreterContext;
 
   return {
-    processText(input: ProcessTextInput): ProcessTextResult {
+    async processText(input: ProcessTextInput): Promise<ProcessTextResult> {
       const { channel, contactId, messageId, text } = input;
       validateMessageId(messageId);
 

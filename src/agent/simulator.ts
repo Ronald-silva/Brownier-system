@@ -257,7 +257,7 @@ async function runSimulator(): Promise<void> {
         // deduplicação, encaminhamento humano automático) mora no Text
         // Conversation Service — o simulador é só o adaptador de stdin/stdout,
         // sem duplicar nenhuma dessas regras aqui.
-        const textResult = textService.processText({ channel, contactId, messageId, text });
+        const textResult = await textService.processText({ channel, contactId, messageId, text });
 
         if (!textResult.duplicateMessage && textResult.result?.event === "ORDER_CREATED") {
           await saveStoreFile(storePath, domainStore);
