@@ -690,6 +690,74 @@ test("nenhuma resposta bruta do provider nem prompt aparecem no retorno", async 
   assert.doesNotMatch(serialized, /systemPrompt|userPrompt|CURRENT_STEP/);
 });
 
+// --- LLM fallback: lote de ações ---
+
+test("LLM com duas ações válidas executa o lote, preserva a ordem e zera o contador", async () => {
+  const { textService, sessionStore: warmupStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("PRODUCT_NOT_FOUND"),
+    interpretWithLlm: async () => llmMatched([
+      { type: "ADD_ITEM", productId: "brownie-brigadeiro", quantity: 2 },
+    ]),
+  });
+  // Sessão precisa estar em BUILDING_ORDER/BROWSING_MENU pra ADD_ITEM valer, então
+  // pré-criamos a sessão nesse passo antes do smoke check de ação única.
+  const contactId = "llm-batch-two";
+  warmupStore.getOrCreate({ channel: CH, contactId, step: "BROWSING_MENU" });
+  const singleActionResult = await textService.processText({ channel: CH, contactId, text: "quero dois tradicionais" });
+  assert.equal(singleActionResult.policy.counterReset, true);
+
+  const { sessionStore, domainStore } = makeStack();
+  const store2: AgentDomainStore = { ...domainStore, products: [...domainStore.products, { ...domainStore.products[0]!, id: "brownie-ninho", name: "Brownie Ninho" }] };
+  const tools2 = createAgentTools({ store: store2 });
+  const conversationService2 = createAgentConversationService({ sessionStore, tools: tools2 });
+  const batchService = createTextConversationService({
+    conversationService: conversationService2, sessionStore, tools: tools2,
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([
+      { type: "ADD_ITEM", productId: "brownie-brigadeiro", quantity: 2 },
+      { type: "ADD_ITEM", productId: "brownie-ninho", quantity: 1 },
+    ]),
+  });
+  const contactId2 = "llm-batch-order";
+  await batchService.processText({ channel: CH, contactId: contactId2, text: "oi" });
+  await batchService.processText({ channel: CH, contactId: contactId2, text: "abre o cardápio" }).catch(() => {});
+  const sessionKey2 = buildAgentSessionKey(CH, contactId2);
+  sessionStore.update(sessionKey2, s => ({ ...s, step: "BUILDING_ORDER" }));
+  const result = await batchService.processText({ channel: CH, contactId: contactId2, text: "Me separa dois tradicionais e mais um de ninho." });
+  assert.equal(result.execution?.mode, "ACTION_BATCH");
+  assert.equal(result.execution?.actionCount, 2);
+  assert.equal(result.execution?.completedActionCount, 2);
+  assert.deepEqual(result.sessionAfter.items, [
+    { productId: "brownie-brigadeiro", quantity: 2 },
+    { productId: "brownie-ninho", quantity: 1 },
+  ]);
+  assert.equal(result.policy.counterReset, true);
+});
+
+test("lote rejeitado no preflight não altera o carrinho e incrementa o contador uma única vez", async () => {
+  const { sessionStore, domainStore } = makeStack();
+  const tools = createAgentTools({ store: domainStore });
+  const conversationService = createAgentConversationService({ sessionStore, tools });
+  const contactId = "llm-batch-rejected";
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  sessionStore.getOrCreate({ channel: CH, contactId, step: "BUILDING_ORDER" });
+  const batchService = createTextConversationService({
+    conversationService, sessionStore, tools,
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([
+      { type: "ADD_ITEM", productId: "brownie-brigadeiro", quantity: 1 },
+      { type: "SET_PAYMENT_METHOD", paymentMethod: "PIX" },
+    ]),
+  });
+  const result = await batchService.processText({ channel: CH, contactId, messageId: "batch-rej-1", text: "quero um brownie e já pago no pix" });
+  assert.equal(result.policy.misunderstandingCountAfter, 1);
+  assert.deepEqual(result.sessionAfter.items, []);
+  assert.equal(sessionStore.hasProcessedMessage(sessionKey, "batch-rej-1"), true);
+});
+
 // --- LLM fallback: NOT_UNDERSTOOD / AMBIGUOUS / REJECTED ---
 
 test("LLM NOT_UNDERSTOOD incrementa o contador uma única vez", async () => {

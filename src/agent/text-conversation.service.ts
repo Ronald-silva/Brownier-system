@@ -27,6 +27,7 @@ import {
 } from "./renderer.ts";
 import { isLlmFallbackEligible } from "./llm-eligibility.ts";
 import type { LlmInterpreter, LlmInterpretationResult, InterpretLlmMessageInput } from "./llm-interpreter.types.ts";
+import { executeConversationActionBatch } from "./conversation-action-batch.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -87,6 +88,14 @@ export type TextConversationInterpretationSummary = {
   finalSource: "DETERMINISTIC" | "LLM" | "POLICY";
 };
 
+export type TextConversationExecutionSummary = {
+  mode: "SINGLE_ACTION" | "ACTION_BATCH";
+  actionCount: number;
+  completedActionCount: number;
+  preflightPassed?: boolean;
+  failedActionIndex?: number;
+};
+
 export type ProcessTextResult = {
   sessionKey: string;
   duplicateMessage: boolean;
@@ -103,6 +112,7 @@ export type ProcessTextResult = {
     counterReset: boolean;
     technicalFailure?: boolean;
   };
+  execution?: TextConversationExecutionSummary;
 };
 
 export type TextConversationService = {
@@ -411,6 +421,81 @@ export function createTextConversationService(
         };
       }
 
+      let batchResult: ReturnType<typeof executeConversationActionBatch> | undefined;
+      if (llmOutcome?.status === "MATCHED" && llmOutcome.actions.length > 1) {
+        batchResult = executeConversationActionBatch({
+          conversationService, channel, contactId, session: sessionBefore, actions: llmOutcome.actions, tools,
+        });
+
+        if (batchResult.status === "COMPLETED") {
+          const lastResult = batchResult.results[batchResult.results.length - 1]!;
+          let sessionAfter = batchResult.sessionAfter;
+          if (sessionAfter.misunderstandingCount !== 0) {
+            sessionAfter = sessionStore.update(sessionKey, current => ({ ...current, misunderstandingCount: 0 }));
+          }
+          if (messageId) {
+            sessionStore.markMessageProcessed(sessionKey, messageId);
+            sessionAfter = sessionStore.get(sessionKey)!;
+          }
+          sessionAfter = structuredClone(sessionAfter);
+          const presentation = buildConversationPresentation({ result: lastResult.result, session: sessionAfter, tools });
+          const messages = renderConversationPresentation(presentation);
+          return {
+            sessionKey,
+            duplicateMessage: false,
+            interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "LLM" },
+            sessionBefore,
+            sessionAfter,
+            result: { ...lastResult.result, session: structuredClone(sessionAfter) },
+            messages,
+            policy: {
+              misunderstandingCountBefore,
+              misunderstandingCountAfter: sessionAfter.misunderstandingCount,
+              handoffTriggered: false,
+              counterReset: true,
+            },
+            execution: {
+              mode: "ACTION_BATCH",
+              actionCount: llmOutcome.actions.length,
+              completedActionCount: batchResult.results.length,
+              preflightPassed: true,
+            },
+          };
+        }
+
+        if (batchResult.status === "FAILED") {
+          const policyResult: TextConversationPolicyResult = {
+            event: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+            messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+          };
+          return {
+            sessionKey,
+            duplicateMessage: false,
+            interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "POLICY" },
+            sessionBefore,
+            sessionAfter: structuredClone(sessionStore.get(sessionKey)!),
+            policyResult,
+            messages: renderTextConversationPolicyMessage(policyResult),
+            policy: {
+              misunderstandingCountBefore,
+              misunderstandingCountAfter: misunderstandingCountBefore,
+              handoffTriggered: false,
+              counterReset: false,
+              technicalFailure: true,
+            },
+            execution: {
+              mode: "ACTION_BATCH",
+              actionCount: llmOutcome.actions.length,
+              completedActionCount: batchResult.results.length,
+              preflightPassed: true,
+              failedActionIndex: batchResult.failedActionIndex,
+            },
+          };
+        }
+        // batchResult.status === "REJECTED": cai no bloco de falha de
+        // compreensão abaixo (mesma mensagem/incremento de uma falha comum).
+      }
+
       const failure: { status: "NOT_UNDERSTOOD" | "AMBIGUOUS"; suggestions: string[] } =
         llmOutcome?.status === "NOT_UNDERSTOOD"
           ? { status: "NOT_UNDERSTOOD", suggestions: publicSuggestions(llmOutcome.suggestions) }
@@ -469,6 +554,17 @@ export function createTextConversationService(
           handoffTriggered,
           counterReset: false,
         },
+        ...(batchResult?.status === "REJECTED"
+          ? {
+              execution: {
+                mode: "ACTION_BATCH" as const,
+                actionCount: llmOutcome!.status === "MATCHED" ? llmOutcome!.actions.length : 0,
+                completedActionCount: 0,
+                preflightPassed: false,
+                failedActionIndex: batchResult.failedActionIndex,
+              },
+            }
+          : {}),
       };
     },
   };
