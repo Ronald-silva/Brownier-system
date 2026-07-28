@@ -381,7 +381,7 @@ function handleConfirmOrder(
   tools: AgentTools,
   generateOrderIdempotencyKey: () => string,
 ): StepResult {
-  if (session.step !== "AWAITING_CONFIRMATION" && session.step !== "ORDER_CREATED") return invalidAction(session, action);
+  if (session.step !== "AWAITING_CONFIRMATION") return invalidAction(session, action);
 
   // A sessão já tem um pedido real associado (ex.: sessão atualizada não foi
   // persistida a tempo de uma nova tentativa de CONFIRM_ORDER chegar) — não

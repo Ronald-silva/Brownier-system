@@ -188,7 +188,7 @@ test("CONFIRM_ORDER repetido com o mesmo messageId cria apenas um pedido", () =>
   assert.equal(domainStore.orders.length, 1);
 });
 
-test("CONFIRM_ORDER com messageIds diferentes na mesma sessão reaproveita a orderIdempotencyKey e não cria um segundo pedido", () => {
+test("CONFIRM_ORDER com messageId diferente após o pedido já criado não gera um segundo pedido", () => {
   const { service, domainStore } = makeService();
   advanceToAwaitingConfirmation(service);
   const { channel, contactId } = readySessionPayload();
@@ -196,8 +196,8 @@ test("CONFIRM_ORDER com messageIds diferentes na mesma sessão reaproveita a ord
   const second = service.processAction({ channel, contactId, action: { type: "CONFIRM_ORDER" }, messageId: "confirm-b" });
   assert.equal(first.result.event, "ORDER_CREATED");
   assert.equal(second.duplicateMessage, false);
-  assert.equal(second.result.event, "ORDER_ALREADY_CREATED");
-  assert.equal(second.result.data?.orderId, first.result.data?.orderId);
+  assert.equal(second.result.event, "INVALID_ACTION");
+  assert.equal(second.sessionAfter.step, "ORDER_CREATED");
   assert.equal(domainStore.orders.length, 1);
 });
 
