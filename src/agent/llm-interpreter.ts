@@ -40,6 +40,54 @@ function resolveMaxOutputLength(maxOutputLength: number | undefined): number {
 
 const PROVIDER_TIMEOUT_MARKER = "LLM_PROVIDER_TIMEOUT";
 
+const SAFE_PROVIDER_ERROR_CODES: ReadonlySet<string> = new Set([
+  "NVIDIA_AUTHENTICATION",
+  "NVIDIA_RATE_LIMIT",
+  "NVIDIA_TIMEOUT",
+  "NVIDIA_SERVER_ERROR",
+  "NVIDIA_EMPTY_OUTPUT",
+  "NVIDIA_UNKNOWN",
+  "TIMEOUT",
+  "AUTHENTICATION",
+  "RATE_LIMIT",
+  "SERVER_ERROR",
+  "EMPTY_OUTPUT",
+  "UNKNOWN",
+  "LOCAL_RATE_LIMIT",
+  "LOCAL_CONCURRENCY_LIMIT",
+]);
+
+type SafeProviderError = {
+  reason: string;
+  retryable: boolean;
+};
+
+const PROVIDER_REJECTED: SafeProviderError = {
+  reason: "PROVIDER_REJECTED",
+  retryable: false,
+};
+
+// Extrai apenas os dois campos seguros já classificados pelos adapters. Não
+// espalha nem serializa o erro, para que mensagem, stack, request ou resposta
+// nunca saiam do limite do provider.
+function extractSafeProviderError(error: unknown): SafeProviderError {
+  if (typeof error !== "object" || error === null) return PROVIDER_REJECTED;
+
+  try {
+    const candidate = error as { code?: unknown; retryable?: unknown };
+    if (
+      typeof candidate.code !== "string" ||
+      !SAFE_PROVIDER_ERROR_CODES.has(candidate.code) ||
+      typeof candidate.retryable !== "boolean"
+    ) {
+      return PROVIDER_REJECTED;
+    }
+    return { reason: candidate.code, retryable: candidate.retryable };
+  } catch {
+    return PROVIDER_REJECTED;
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_resolve, reject) => {
@@ -85,10 +133,13 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
       } catch (error) {
         const durationMs = Date.now() - startedAt;
         const isTimeout = error instanceof Error && error.message === PROVIDER_TIMEOUT_MARKER;
+        const providerError = isTimeout
+          ? { reason: "TIMEOUT", retryable: true }
+          : extractSafeProviderError(error);
         return {
           status: "PROVIDER_ERROR",
-          reason: isTimeout ? "TIMEOUT" : "PROVIDER_REJECTED",
-          retryable: isTimeout,
+          reason: providerError.reason,
+          retryable: providerError.retryable,
           promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
           durationMs,
         };

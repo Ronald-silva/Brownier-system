@@ -919,6 +919,22 @@ test("LLM NOT_UNDERSTOOD incrementa o contador uma única vez", async () => {
   assert.equal(result.interpretation?.finalSource, "POLICY");
 });
 
+test("LLM NOT_UNDERSTOOD expõe somente LLM_NOT_UNDERSTOOD e não muta o resultado original", async () => {
+  const rawOutcome = llmNotUnderstood("SYSTEM_PROMPT_SECRET_123 85999999999 USER_MESSAGE_SECRET_456");
+  const snapshot = structuredClone(rawOutcome);
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => rawOutcome,
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-public-not-understood", text: "USER_MESSAGE_SECRET_456" });
+  const serialized = JSON.stringify(result);
+  assert.equal(result.interpretation?.llm?.status, "NOT_UNDERSTOOD");
+  assert.equal((result.interpretation?.llm as { reason?: string }).reason, "LLM_NOT_UNDERSTOOD");
+  assert.doesNotMatch(serialized, /SYSTEM_PROMPT_SECRET_123|85999999999|USER_MESSAGE_SECRET_456/);
+  assert.deepEqual(rawOutcome, snapshot);
+});
+
 test("LLM AMBIGUOUS incrementa o contador uma única vez e não expõe candidatos", async () => {
   const { textService } = makeStack({
     llmMode: "FALLBACK",
@@ -936,6 +952,19 @@ test("LLM AMBIGUOUS incrementa o contador uma única vez e não expõe candidato
   assert.doesNotMatch(serialized, /brownie-secreto|productId/);
 });
 
+test("LLM AMBIGUOUS expõe somente LLM_AMBIGUOUS e não expõe reason arbitrário ou dados pessoais", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmAmbiguous("SYSTEM_PROMPT_SECRET_123 85999999999 USER_MESSAGE_SECRET_456"),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-public-ambiguous", text: "USER_MESSAGE_SECRET_456" });
+  const serialized = JSON.stringify(result);
+  assert.equal(result.interpretation?.llm?.status, "AMBIGUOUS");
+  assert.equal((result.interpretation?.llm as { reason?: string }).reason, "LLM_AMBIGUOUS");
+  assert.doesNotMatch(serialized, /SYSTEM_PROMPT_SECRET_123|85999999999|USER_MESSAGE_SECRET_456/);
+});
+
 test("LLM REJECTED incrementa o contador uma única vez e não expõe o motivo técnico", async () => {
   const { textService } = makeStack({
     llmMode: "FALLBACK",
@@ -947,6 +976,7 @@ test("LLM REJECTED incrementa o contador uma única vez e não expõe o motivo t
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /ACTION_NOT_ALLOWED/);
   assert.doesNotMatch(serialized, /promptVersion/);
+  assert.equal((result.interpretation?.llm as { reason?: string }).reason, "REJECTED_BY_VALIDATOR");
 });
 
 test("suggestions do LLM em NOT_UNDERSTOOD são sanitizadas (dedupe, limite, sem vazio)", async () => {
@@ -1020,6 +1050,22 @@ test("PROVIDER_ERROR não incrementa o contador", async () => {
   const result = await textService.processText({ channel: CH, contactId: "llm-provider-error", text: "algo complexo" });
   assert.equal(result.policy.misunderstandingCountAfter, 0);
   assert.equal(result.policy.technicalFailure, true);
+  assert.equal((result.interpretation?.llm as { reason?: string }).reason, "PROVIDER_REJECTED");
+});
+
+test("ação válida e confidence determinística continuam inalterados", async () => {
+  const deterministic = {
+    status: "MATCHED" as const,
+    action: { type: "START_CONVERSATION" as const },
+    confidence: 1 as const,
+    source: "T" as const,
+    normalizedText: "oi",
+  };
+  const { textService } = makeStack({ interpretMessage: () => deterministic });
+  const result = await textService.processText({ channel: CH, contactId: "deterministic-unchanged", text: "oi" });
+  assert.equal(result.result?.event, "WELCOME");
+  assert.equal(result.interpretation?.deterministic, deterministic);
+  assert.equal((result.interpretation?.deterministic as { confidence?: number }).confidence, 1);
 });
 
 test("timeout (PROVIDER_ERROR retryable) não incrementa o contador nem dispara handoff", async () => {

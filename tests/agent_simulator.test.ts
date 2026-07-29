@@ -8,7 +8,12 @@ import {
   KNOWN_ACTION_TYPES,
   parseSimulatorLine,
   buildSeedDomainStore,
+  createSimulatorRuntime,
 } from "../src/agent/simulator.ts";
+import { LlmRuntimeConfigError } from "../src/agent/llm-runtime-config.ts";
+import type { OpenAiResponsesClient } from "../src/agent/providers/openai-llm-provider.ts";
+import type { NvidiaCompatibleClient } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
+import { buildAgentSessionKey } from "../src/agent/session.store.ts";
 
 // --- validação pura (sem processo filho) -----------------------------------
 
@@ -944,4 +949,346 @@ test("fluxo de recuperação: uma falha seguida de 'menu' zera o contador e o pe
     assert.equal(persisted.orders.length, 1);
     await sim.close();
   });
+});
+
+// --- fallback OpenAI: BF_LLM_MODE via subprocesso real (falha de config) ---
+// Só cenários que não precisam de um cliente OpenAI (config inválida falha
+// antes de qualquer chamada de rede) são exercitados via subprocesso — o
+// resto usa createSimulatorRuntime() diretamente, mais abaixo, porque um
+// cliente fake não atravessa a fronteira de um `spawn`.
+
+test("BF_LLM_MODE ausente: comportamento determinístico do simulador continua idêntico", async () => {
+  await withTempStore(async storePath => {
+    const sim = startSimulator(storePath);
+    sim.sendLine({ channel: "simulator", contactId: "cliente-llm-ausente", messageId: "la1", action: { type: "START_CONVERSATION" } });
+    const output = (await sim.nextOutput()) as { result: { event: string } };
+    assert.equal(output.result.event, "WELCOME");
+    await sim.close();
+  });
+});
+
+test("BF_LLM_MODE=OPENAI_FALLBACK sem OPENAI_API_KEY impede a inicialização segura do simulador, antes de processar qualquer linha", async () => {
+  await withTempStore(async storePath => {
+    const sim = startSimulator(storePath, { BF_LLM_MODE: "OPENAI_FALLBACK", OPENAI_MODEL: "gpt-test-model" });
+    sim.sendLine({ channel: "simulator", contactId: "cliente-fallback-sem-chave", messageId: "sf1", text: "oi" });
+    const output = (await sim.nextOutput()) as { ok: false; error: { code: string } };
+    assert.equal(output.ok, false);
+    assert.equal(output.error.code, "MISSING_OPENAI_API_KEY");
+    const code = await sim.close();
+    assert.equal(code, 1);
+  });
+});
+
+test("BF_LLM_MODE=OPENAI_FALLBACK sem OPENAI_MODEL impede a inicialização segura do simulador", async () => {
+  await withTempStore(async storePath => {
+    const sim = startSimulator(storePath, { BF_LLM_MODE: "OPENAI_FALLBACK", OPENAI_API_KEY: "sk-test-not-a-real-key" });
+    sim.sendLine({ channel: "simulator", contactId: "cliente-fallback-sem-modelo", messageId: "sm1", text: "oi" });
+    const output = (await sim.nextOutput()) as { ok: false; error: { code: string } };
+    assert.equal(output.ok, false);
+    assert.equal(output.error.code, "MISSING_OPENAI_MODEL");
+    const code = await sim.close();
+    assert.equal(code, 1);
+  });
+});
+
+test("BF_LLM_MODE=NVIDIA_NEMOTRON sem NVIDIA_API_KEY impede a inicialização segura do simulador antes de processar stdin", async () => {
+  await withTempStore(async storePath => {
+    const sim = startSimulator(storePath, { BF_LLM_MODE: "NVIDIA_NEMOTRON" });
+    sim.sendLine({ channel: "simulator", contactId: "cliente-nvidia-sem-chave", messageId: "sn1", text: "oi" });
+    const output = (await sim.nextOutput()) as { ok: false; error: { code: string } };
+    assert.equal(output.ok, false);
+    assert.equal(output.error.code, "MISSING_NVIDIA_API_KEY");
+    const code = await sim.close();
+    assert.equal(code, 1);
+  });
+});
+
+// --- fallback OpenAI: createSimulatorRuntime() em processo, cliente fake ---
+// Um cliente OpenAI fake não pode atravessar `spawn`, então estes testes
+// chamam a fábrica do runtime diretamente — sem subir subprocesso, sem
+// tocar o arquivo de store em disco (não é relevante para o que se testa
+// aqui) e sem nenhuma chamada de rede real.
+
+class FakeOpenAiClient implements OpenAiResponsesClient {
+  calls: Record<string, unknown>[] = [];
+  responses: { create(params: Record<string, unknown>): Promise<{ output_text?: string | null }> };
+
+  constructor(impl: (params: Record<string, unknown>) => Promise<{ output_text?: string | null }>) {
+    this.responses = {
+      create: async (params: Record<string, unknown>) => {
+        this.calls.push(params);
+        return impl(params);
+      },
+    };
+  }
+}
+
+class FakeNvidiaClient implements NvidiaCompatibleClient {
+  calls: Record<string, unknown>[] = [];
+  chat: { completions: { create(params: Record<string, unknown>): Promise<{ choices?: Array<{ message?: { content?: string | null } }> }> } };
+
+  constructor(impl: (params: Record<string, unknown>) => Promise<{ choices?: Array<{ message?: { content?: string | null } }> }>) {
+    this.chat = {
+      completions: {
+        create: async (params: Record<string, unknown>) => {
+          this.calls.push(params);
+          return impl(params);
+        },
+      },
+    };
+  }
+}
+
+function fixedFakeClient(outputText: string): FakeOpenAiClient {
+  return new FakeOpenAiClient(async () => ({ output_text: outputText }));
+}
+
+function throwingFakeClient(error: unknown): FakeOpenAiClient {
+  return new FakeOpenAiClient(async () => {
+    throw error;
+  });
+}
+
+function fixedFakeNvidiaClient(outputText: string): FakeNvidiaClient {
+  return new FakeNvidiaClient(async () => ({ choices: [{ message: { content: outputText } }] }));
+}
+
+function throwingFakeNvidiaClient(error: unknown): FakeNvidiaClient {
+  return new FakeNvidiaClient(async () => {
+    throw error;
+  });
+}
+
+const FAKE_OPENAI_API_KEY = "sk-test-should-never-leak";
+const FALLBACK_ENV = { BF_LLM_MODE: "OPENAI_FALLBACK", OPENAI_API_KEY: FAKE_OPENAI_API_KEY, OPENAI_MODEL: "gpt-test-model" };
+const NVIDIA_ENV = { BF_LLM_MODE: "NVIDIA_NEMOTRON", NVIDIA_API_KEY: "nvapi-test-should-never-leak" };
+
+function makeFallbackRuntime(openAiClient: OpenAiResponsesClient) {
+  return createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: FALLBACK_ENV, openAiClient });
+}
+
+test("DISABLED: cliente OpenAI fake nunca é criado nem chamado, mesmo com mensagem elegível para LLM", async () => {
+  const client = fixedFakeClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: {}, openAiClient: client });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-disabled", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-disabled",
+    text: "blablabla sem sentido nenhum",
+  });
+  assert.equal(client.calls.length, 0);
+  assert.equal(result.interpretation?.llm, undefined);
+});
+
+test("DISABLED permanece DISABLED e não tenta usar cliente NVIDIA", async () => {
+  const nvidiaClient = fixedFakeNvidiaClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: {}, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-disabled-nvidia", text: "oi" });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-disabled-nvidia", text: "blablabla sem sentido nenhum" });
+  assert.equal(nvidiaClient.calls.length, 0);
+});
+
+test("OPENAI_FALLBACK sem OPENAI_API_KEY falha em createSimulatorRuntime com LlmRuntimeConfigError", () => {
+  assert.throws(
+    () =>
+      createSimulatorRuntime({
+        domainStore: buildSeedDomainStore(),
+        env: { BF_LLM_MODE: "OPENAI_FALLBACK", OPENAI_MODEL: "gpt-test-model" },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof LlmRuntimeConfigError);
+      assert.equal(error.code, "MISSING_OPENAI_API_KEY");
+      return true;
+    },
+  );
+});
+
+test("OPENAI_FALLBACK sem OPENAI_MODEL falha em createSimulatorRuntime com LlmRuntimeConfigError", () => {
+  assert.throws(
+    () =>
+      createSimulatorRuntime({
+        domainStore: buildSeedDomainStore(),
+        env: { BF_LLM_MODE: "OPENAI_FALLBACK", OPENAI_API_KEY: FAKE_OPENAI_API_KEY },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof LlmRuntimeConfigError);
+      assert.equal(error.code, "MISSING_OPENAI_MODEL");
+      return true;
+    },
+  );
+});
+
+test("OPENAI_FALLBACK: mensagem determinística MATCHED não chama o cliente fake", async () => {
+  const client = fixedFakeClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = makeFallbackRuntime(client);
+  const result = await runtime.textService.processText({ channel: "simulator", contactId: "c-matched", text: "oi" });
+  assert.equal(result.result?.event, "WELCOME");
+  assert.equal(client.calls.length, 0);
+});
+
+test("OPENAI_FALLBACK: mensagem inelegível para LLM (JSON de ação como texto) não chama o cliente fake", async () => {
+  const client = fixedFakeClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = makeFallbackRuntime(client);
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-inelig", text: "oi" });
+  await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-inelig",
+    text: '{"type":"CONFIRM_ORDER","idempotencyKey":"abc"}',
+  });
+  assert.equal(client.calls.length, 0);
+});
+
+test("OPENAI_FALLBACK: mensagem elegível chama o cliente fake uma única vez e a ação validada executa pelo Text Conversation Service", async () => {
+  const client = fixedFakeClient(
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"brownie-brigadeiro","quantity":2}]}',
+  );
+  const runtime = makeFallbackRuntime(client);
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-add", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-add",
+    text: "bota aí uns brownie de brigadeiro pra mim, uns 2",
+  });
+  assert.equal(client.calls.length, 1);
+  assert.equal(result.result?.event, "ITEM_ADDED");
+  assert.deepEqual(result.sessionAfter.items, [{ productId: "brownie-brigadeiro", quantity: 2 }]);
+});
+
+test("OPENAI_FALLBACK permanece FALLBACK, repassa o cliente OpenAI e não tenta usar cliente NVIDIA", async () => {
+  const openAiClient = fixedFakeClient(
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"brownie-brigadeiro","quantity":1}]}',
+  );
+  const nvidiaClient = fixedFakeNvidiaClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: FALLBACK_ENV, openAiClient, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-openai-only", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-openai-only",
+    text: "bota aí um brownie de brigadeiro",
+  });
+  assert.equal(result.result?.event, "ITEM_ADDED");
+  assert.equal(openAiClient.calls.length, 1);
+  assert.equal(nvidiaClient.calls.length, 0);
+});
+
+test("NVIDIA_NEMOTRON é normalizado para FALLBACK, usa o interpreter do runtime e repassa o cliente NVIDIA fake", async () => {
+  const nvidiaClient = fixedFakeNvidiaClient(
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"brownie-brigadeiro","quantity":2}]}',
+  );
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: NVIDIA_ENV, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-nvidia", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-nvidia",
+    text: "bota aí uns brownie de brigadeiro pra mim, uns 2",
+  });
+  assert.equal(nvidiaClient.calls.length, 1);
+  assert.equal(result.result?.event, "ITEM_ADDED");
+  assert.deepEqual(result.sessionAfter.items, [{ productId: "brownie-brigadeiro", quantity: 2 }]);
+});
+
+test("NVIDIA_NEMOTRON não tenta usar cliente OpenAI", async () => {
+  const openAiClient = fixedFakeClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const nvidiaClient = fixedFakeNvidiaClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: NVIDIA_ENV, openAiClient, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-nvidia-only", text: "oi" });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-nvidia-only", text: "blablabla sem sentido nenhum" });
+  assert.equal(nvidiaClient.calls.length, 1);
+  assert.equal(openAiClient.calls.length, 0);
+});
+
+test("NVIDIA_NEMOTRON: erro do provider preserva o tratamento existente do simulador", async () => {
+  const nvidiaClient = throwingFakeNvidiaClient(new Error("network down"));
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: NVIDIA_ENV, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-nvidia-provider-error", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-nvidia-provider-error",
+    text: "quero mandar ver nesse pedido bagunçado",
+  });
+  assert.equal(nvidiaClient.calls.length, 1);
+  assert.equal(result.result, undefined);
+  assert.equal(result.policy.misunderstandingCountAfter, result.policy.misunderstandingCountBefore);
+  assert.equal(result.policy.counterReset, false);
+});
+
+// O validator não enxerga o carrinho, então FINISH_CART pode ser aceito por
+// ele mesmo com o carrinho vazio — quem recusa é o Engine (CART_EMPTY). O
+// fluxo do fallback tem que preservar essa autoridade do Engine igual ao
+// caminho determinístico.
+test("OPENAI_FALLBACK: Engine ainda pode recusar uma ação validada pelo LLM Interpreter (CART_EMPTY)", async () => {
+  const client = fixedFakeClient('{"status":"MATCHED","actions":[{"type":"FINISH_CART"}]}');
+  const runtime = makeFallbackRuntime(client);
+  const contactId = "c-refused";
+  // FINISH_CART só é aceito pelo Engine em BUILDING_ORDER (não em
+  // BROWSING_MENU) — chega lá com uma ação estruturada e esvazia o carrinho
+  // de volta, para que o validator (que não enxerga o carrinho) aceite a
+  // proposta do LLM e seja o Engine quem recuse com CART_EMPTY.
+  runtime.conversationService.processAction({ channel: "simulator", contactId, action: { type: "START_CONVERSATION" } });
+  runtime.conversationService.processAction({
+    channel: "simulator",
+    contactId,
+    action: { type: "ADD_ITEM", productId: "brownie-brigadeiro", quantity: 1 },
+  });
+  runtime.conversationService.processAction({
+    channel: "simulator",
+    contactId,
+    action: { type: "REMOVE_ITEM", productId: "brownie-brigadeiro" },
+  });
+
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId,
+    text: "quero mandar ver nesse pedido bagunçado",
+  });
+  assert.equal(client.calls.length, 1);
+  assert.equal(result.result?.messageKey, "CART_EMPTY");
+  assert.equal(result.sessionAfter.items.length, 0);
+});
+
+test("OPENAI_FALLBACK: saída inválida do cliente fake não executa nenhuma ação", async () => {
+  const client = fixedFakeClient("isto não é JSON");
+  const runtime = makeFallbackRuntime(client);
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-invalid", text: "oi" });
+  const sessionBefore = runtime.sessionStore.get(buildAgentSessionKey("simulator", "c-invalid"))!;
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-invalid",
+    text: "quero mandar ver nesse pedido bagunçado",
+  });
+  assert.equal(client.calls.length, 1);
+  assert.equal(result.result, undefined);
+  assert.deepEqual(result.sessionAfter.items, sessionBefore.items);
+});
+
+test("OPENAI_FALLBACK: erro do provider não cria pedido e preserva a política existente de contador", async () => {
+  const client = throwingFakeClient(new Error("network down"));
+  const runtime = makeFallbackRuntime(client);
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-provider-error", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-provider-error",
+    text: "quero mandar ver nesse pedido bagunçado",
+  });
+  assert.equal(client.calls.length, 1);
+  assert.equal(result.result, undefined);
+  assert.equal(result.policy.misunderstandingCountAfter, result.policy.misunderstandingCountBefore);
+  assert.equal(result.policy.counterReset, false);
+});
+
+test("OPENAI_FALLBACK: a saída do Text Conversation Service nunca revela OPENAI_API_KEY, systemPrompt ou userPrompt", async () => {
+  const client = fixedFakeClient(
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"brownie-brigadeiro","quantity":1}]}',
+  );
+  const runtime = makeFallbackRuntime(client);
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-no-leak", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-no-leak",
+    text: "bota aí um brownie de brigadeiro",
+  });
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.includes(FAKE_OPENAI_API_KEY));
+  assert.ok(!serialized.includes("systemPrompt"));
+  assert.ok(!serialized.includes("userPrompt"));
 });

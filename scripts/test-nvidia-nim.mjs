@@ -4,7 +4,9 @@ import OpenAI from "openai";
 const BASE_URL = "https://integrate.api.nvidia.com/v1";
 const PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b";
 
-if (!process.env.NVIDIA_API_KEY) {
+if (process.env.BF_LLM_LIVE_SMOKE !== "true") {
+  console.log("Smoke test NVIDIA desativado. Defina BF_LLM_LIVE_SMOKE=true para executar uma chamada externa.");
+} else if (!process.env.NVIDIA_API_KEY) {
   console.error("NVIDIA_API_KEY não foi encontrada. Adicione-a ao arquivo .env e tente novamente.");
   process.exitCode = 1;
 } else {

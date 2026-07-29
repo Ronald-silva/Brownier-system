@@ -250,6 +250,9 @@ type PublicLlmMatchedWithoutPromptVersion = Omit<LlmInterpretationMatched, "prom
 };
 type PublicLlmAmbiguous = Omit<LlmInterpretationAmbiguous, "candidates"> & { candidates?: never };
 type PublicLlmRejected = Omit<LlmInterpretationRejected, "promptVersion"> & { promptVersion?: never };
+type PublicLlmProviderError = Omit<LlmInterpretationProviderError, "reason"> & {
+  reason: "TIMEOUT" | "PROVIDER_REJECTED";
+};
 
 export type PublicLlmInterpretationResult =
   | LlmInterpretationMatched
@@ -257,7 +260,26 @@ export type PublicLlmInterpretationResult =
   | LlmInterpretationNotUnderstood
   | PublicLlmAmbiguous
   | PublicLlmRejected
-  | LlmInterpretationProviderError;
+  | PublicLlmProviderError;
+
+// Reasons vindos do modelo nunca são públicos: o modelo pode ecoar prompt,
+// mensagem do usuário ou dados da sessão. O consumidor recebe só códigos
+// constantes, suficientes para distinguir o tipo de resultado sem propagar
+// texto livre do provider.
+type LlmOutcomeWithReason = Exclude<LlmInterpretationResult, LlmInterpretationMatched>;
+
+function sanitizePublicLlmReason(outcome: LlmInterpretationNotUnderstood): "LLM_NOT_UNDERSTOOD";
+function sanitizePublicLlmReason(outcome: LlmInterpretationAmbiguous): "LLM_AMBIGUOUS";
+function sanitizePublicLlmReason(outcome: LlmInterpretationRejected): "REJECTED_BY_VALIDATOR";
+function sanitizePublicLlmReason(outcome: LlmInterpretationProviderError): "TIMEOUT" | "PROVIDER_REJECTED";
+function sanitizePublicLlmReason(
+  outcome: LlmOutcomeWithReason,
+): "LLM_NOT_UNDERSTOOD" | "LLM_AMBIGUOUS" | "REJECTED_BY_VALIDATOR" | "TIMEOUT" | "PROVIDER_REJECTED" {
+  if (outcome.status === "NOT_UNDERSTOOD") return "LLM_NOT_UNDERSTOOD";
+  if (outcome.status === "AMBIGUOUS") return "LLM_AMBIGUOUS";
+  if (outcome.status === "REJECTED") return "REJECTED_BY_VALIDATOR";
+  return outcome.reason === "TIMEOUT" ? "TIMEOUT" : "PROVIDER_REJECTED";
+}
 
 // `stripPromptVersion` é usado quando o resultado MATCHED é apenas contexto de
 // um lote que não completou (REJECTED no preflight ou FAILED na execução):
@@ -273,7 +295,7 @@ function sanitizeLlmOutcomeForResult(
     const sanitized: PublicLlmRejected = {
       status: "REJECTED",
       source: outcome.source,
-      reason: "REJECTED_BY_VALIDATOR",
+      reason: sanitizePublicLlmReason(outcome),
       durationMs: outcome.durationMs,
     };
     return sanitized;
@@ -281,8 +303,28 @@ function sanitizeLlmOutcomeForResult(
   if (outcome.status === "AMBIGUOUS") {
     const sanitized: PublicLlmAmbiguous = {
       status: "AMBIGUOUS",
-      reason: outcome.reason,
+      reason: sanitizePublicLlmReason(outcome),
       source: outcome.source,
+      promptVersion: outcome.promptVersion,
+      durationMs: outcome.durationMs,
+    };
+    return sanitized;
+  }
+  if (outcome.status === "NOT_UNDERSTOOD") {
+    return {
+      status: "NOT_UNDERSTOOD",
+      reason: sanitizePublicLlmReason(outcome),
+      ...(outcome.suggestions ? { suggestions: outcome.suggestions } : {}),
+      source: outcome.source,
+      promptVersion: outcome.promptVersion,
+      durationMs: outcome.durationMs,
+    };
+  }
+  if (outcome.status === "PROVIDER_ERROR") {
+    const sanitized: PublicLlmProviderError = {
+      status: "PROVIDER_ERROR",
+      reason: sanitizePublicLlmReason(outcome),
+      retryable: outcome.retryable,
       promptVersion: outcome.promptVersion,
       durationMs: outcome.durationMs,
     };

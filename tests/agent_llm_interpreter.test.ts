@@ -104,6 +104,79 @@ test("provider promise rejection becomes a PROVIDER_ERROR", async () => {
   if (result.status === "PROVIDER_ERROR") assert.equal(result.retryable, false);
 });
 
+async function rejectedProviderResult(error: unknown) {
+  const provider = new FakeLlmProvider(async () => {
+    throw error;
+  });
+  return createLlmInterpreter({ provider }).interpret({ text: "oi", session: atStep("START") });
+}
+
+for (const [code, retryable] of [
+  ["NVIDIA_RATE_LIMIT", true],
+  ["NVIDIA_TIMEOUT", true],
+  ["NVIDIA_AUTHENTICATION", false],
+  ["NVIDIA_SERVER_ERROR", true],
+  ["RATE_LIMIT", true],
+  ["TIMEOUT", true],
+  ["AUTHENTICATION", false],
+] as const) {
+  test(`provider error allowlisted ${code} preserves code and retryable`, async () => {
+    const result = await rejectedProviderResult({ code, retryable });
+    assert.equal(result.status, "PROVIDER_ERROR");
+    if (result.status === "PROVIDER_ERROR") {
+      assert.equal(result.reason, code);
+      assert.equal(result.retryable, retryable);
+    }
+  });
+}
+
+for (const [name, error] of [
+  ["unknown code", { code: "UNSAFE_PROVIDER_CODE", retryable: true }],
+  ["missing retryable", { code: "NVIDIA_RATE_LIMIT" }],
+  ["invalid retryable", { code: "NVIDIA_RATE_LIMIT", retryable: "true" }],
+  ["invalid code", { code: 123, retryable: true }],
+  ["string", "NVIDIA_RATE_LIMIT"],
+  ["null", null],
+] as const) {
+  test(`provider error ${name} uses the safe fallback`, async () => {
+    const result = await rejectedProviderResult(error);
+    assert.equal(result.status, "PROVIDER_ERROR");
+    if (result.status === "PROVIDER_ERROR") {
+      assert.equal(result.reason, "PROVIDER_REJECTED");
+      assert.equal(result.retryable, false);
+    }
+  });
+}
+
+test("provider error never exposes sensitive properties or mutates the error", async () => {
+  const error = Object.assign(new Error("SYSTEM_PROMPT_SECRET_456"), {
+    code: "NVIDIA_RATE_LIMIT",
+    retryable: true,
+    apiKey: "API_KEY_SECRET_123",
+    stack: "STACK_SECRET_789",
+    request: { prompt: "SYSTEM_PROMPT_SECRET_456" },
+  });
+  const snapshot = {
+    code: error.code,
+    retryable: error.retryable,
+    apiKey: error.apiKey,
+    stack: error.stack,
+    request: structuredClone(error.request),
+  };
+  const result = await rejectedProviderResult(error);
+  const serialized = JSON.stringify(result);
+  assert.equal(result.status, "PROVIDER_ERROR");
+  if (result.status === "PROVIDER_ERROR") {
+    assert.equal(result.reason, "NVIDIA_RATE_LIMIT");
+    assert.equal(result.retryable, true);
+  }
+  assert.doesNotMatch(serialized, /API_KEY_SECRET_123|SYSTEM_PROMPT_SECRET_456|STACK_SECRET_789/);
+  assert.deepEqual(
+    { code: error.code, retryable: error.retryable, apiKey: error.apiKey, stack: error.stack, request: error.request },
+    snapshot,
+  );
+});
+
 test("provider timeout becomes a retryable PROVIDER_ERROR", async () => {
   const provider = new FakeLlmProvider(() => new Promise(() => {}));
   const interpreter = createLlmInterpreter({ provider, timeoutMs: 100 });

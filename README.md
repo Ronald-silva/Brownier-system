@@ -29,14 +29,23 @@ ADMIN_ACCESS_CODE=<defina-um-codigo-forte> npm run dev
 
 ## Variáveis de ambiente
 
+Use [.env.example](.env.example) como referência e mantenha valores reais
+somente no `.env` local ou no provedor de deploy.
+
 | Variável | Necessária | Uso |
 | --- | --- | --- |
 | `ADMIN_ACCESS_CODE` | Sim, em produção | Protege as rotas administrativas. Obrigatória e não pode ser `brownies-demo` quando `NODE_ENV=production` — o servidor não inicia caso contrário. Em desenvolvimento, é opcional (fallback `brownies-demo`). |
 | `ADMIN_SESSION_TTL_MS` | Não | Duração da sessão administrativa em milissegundos, padrão 4 horas. |
 | `ADMIN_LOGIN_WINDOW_MS` | Não | Janela do limite de tentativas de login, padrão 10 minutos (5 tentativas inválidas por IP). |
 | `PORT` | Não | Porta do servidor, padrão `3000`. |
+| `BF_STORE_PATH` | Não | Caminho do armazenamento JSON local. |
+| `BF_AGENT_MAX_MISUNDERSTANDINGS` | Não | Limite de não compreensões antes do handoff; padrão `3`. |
+| `BF_SIMULATOR_DEBUG_CONTEXT` | Não | Inclui contexto de apresentação na saída do simulador. |
+| `BF_LLM_MODE` | Não | `DISABLED` (padrão), `OPENAI_FALLBACK` ou `NVIDIA_NEMOTRON`. |
+| `OPENAI_*` e limites `BF_LLM_*` | Condicional | Necessários somente em `OPENAI_FALLBACK`. |
+| `NVIDIA_*` | Condicional | Necessários/configuráveis somente em `NVIDIA_NEMOTRON`. |
 
-Não há credenciais de pagamento, Firebase, WhatsApp ou Evolution no MVP.
+Não há integração com pagamento, Firebase, WhatsApp ou Evolution no MVP.
 
 ## Verificação
 
@@ -119,16 +128,16 @@ O simulador chama `buildConversationPresentation()` seguido de `renderConversati
 
 ### Interpretador LLM — infraestrutura
 
-`src/agent/llm-interpreter.ts`, `llm-prompt.ts` e `llm-output-validator.ts` implementam a infraestrutura de um interpretador por IA, pensado para ser usado no futuro apenas quando o Deterministic Interpreter devolver `NOT_UNDERSTOOD`/`AMBIGUOUS` em cenários elegíveis (mensagens naturais mais complexas, como "quero dois brownies tradicionais e um de ninho").
+`src/agent/llm-interpreter.ts`, `llm-prompt.ts` e `llm-output-validator.ts` implementam o interpretador por IA opcional, acionado apenas depois de um `NOT_UNDERSTOOD`/`AMBIGUOUS` determinístico em cenários elegíveis (por exemplo, uma mensagem natural mais complexa).
 
 Pontos importantes desta etapa:
 
-- **Ainda não há provider real.** `LlmInterpreterProvider` é uma interface injetável (`generateStructuredOutput(request): Promise<unknown>`), independente de OpenAI/Anthropic/Gemini ou qualquer SDK — nenhum deles foi instalado. Os testes usam apenas um `FakeLlmProvider` local.
+- **Providers reais são opcionais.** O runtime usa o SDK `openai` para `OPENAI_FALLBACK` e para o endpoint compatível do NVIDIA NIM/Nemotron em `NVIDIA_NEMOTRON`. `BF_LLM_MODE=DISABLED` é o padrão e não cria provider nem faz chamada externa. Os testes usam clientes fake locais.
 - **Toda saída passa por validação local antes de virar ação.** `parseLlmOutput`/`validateLlmOutput` (`src/agent/llm-output-validator.ts`) usam só `JSON.parse` (nunca `eval`/`Function`) e comparam a proposta do provider contra uma allowlist de ações e contra os dados reais de `context` — nada do que o provider afirma é aceito por si só.
 - **Somente ações já existentes no contrato real podem ser retornadas** (`AgentConversationAction`), classificadas e restritas por etapa da conversa (ex.: `CONFIRM_ORDER` só é aceito em `AWAITING_CONFIRMATION`, e nunca combinado com outras alterações no mesmo lote).
 - **Produtos, horários e formas de pagamento precisam existir no contexto público informado** — `productId`/`productName` só resolvem por correspondência exata (nunca fuzzy, nunca a primeira opção em caso de ambiguidade), `pickupTime` só aceita valores exatamente presentes em `pickupSlots` (com a única normalização seed seguro "19h" → "19:00", quando "19:00" já existe na lista), e `paymentMethod` só aceita o valor canônico de `paymentOptions`. Pedidos de entrega (`ENTREGA`/`DELIVERY`) nunca são aceitos.
 - **Nenhuma criação de pedido ocorre nesta camada** — o LLM Interpreter não importa Agent Tools, Orders, Session Store nem calcula preço; ele só produz `AgentConversationAction[]` já validadas, que ainda precisariam passar pelo Conversation Service e pelo Engine (fluxo oficial, inalterado).
-- **A integração com a Text Conversation Service/Interpretation Policy está descrita na próxima seção** — veja "Fallback LLM controlado" logo abaixo para como (e quando) essa infraestrutura é efetivamente acionada.
+- **As variáveis condicionais estão em `.env.example`.** Configure uma chave somente quando escolher explicitamente um dos modos ativos.
 
 ### Fallback LLM controlado
 
@@ -163,8 +172,27 @@ antes dele, e nunca para tudo.
 - Erros técnicos do provider (`PROVIDER_ERROR`, incluindo timeout) nunca
   contam como incompreensão: não incrementam `misunderstandingCount`, não
   registram `messageId` (permitindo novo retry) e não disparam handoff.
-- O simulador CLI (`npm run agent:simulate`) continua sempre com o LLM
-  desabilitado — nenhum provider real está conectado nesta etapa.
+- O simulador CLI respeita `BF_LLM_MODE`; sem configuração, permanece em
+  `DISABLED`. Os modos ativos devem ser configurados deliberadamente e nunca
+  são usados por `npm test`.
+
+### Providers e smoke tests
+
+- `OPENAI_FALLBACK` usa OpenAI somente para mensagens elegíveis; `NVIDIA_NEMOTRON`
+  usa NVIDIA NIM/Nemotron quando configurado.
+- O LLM nunca cria pedidos diretamente nem calcula preços. Toda ação passa pelo
+  schema, pelo validador local, pelo Conversation Service e pelas regras do Engine.
+- `npm test` não realiza chamadas externas. Os scripts `test:nim`,
+  `agent:smoke:openai` e `agent:smoke:nvidia` são manuais e podem fazer rede
+  somente com a flag explícita `BF_LLM_LIVE_SMOKE` habilitada.
+
+## Estado atual da infraestrutura
+
+O armazenamento de catálogo e pedidos ainda é JSON local, e as sessões, locks
+e limites do agente ainda vivem em memória. Portanto, o sistema não está pronto
+para múltiplas réplicas. Railway, Evolution Go e PostgreSQL ainda não estão
+integrados; enquanto essa persistência não for substituída, uma única réplica é
+necessária inicialmente.
 
 ## Arquitetura
 

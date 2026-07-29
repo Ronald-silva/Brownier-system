@@ -12,7 +12,10 @@ import { createAgentConversationService, type AgentConversationServiceResult } f
 import { buildConversationPresentation } from "./presentation.ts";
 import { renderConversationPresentation } from "./renderer.ts";
 import { createTextConversationService, TextConversationServiceError } from "./text-conversation.service.ts";
-import type { LlmInterpreter } from "./llm-interpreter.types.ts";
+import { resolveLlmRuntime } from "./llm-runtime.ts";
+import { LlmRuntimeConfigError } from "./llm-runtime-config.ts";
+import type { OpenAiResponsesClient } from "./providers/openai-llm-provider.ts";
+import type { NvidiaCompatibleClient } from "./providers/nvidia-nemotron-llm-provider.ts";
 import type { TextConversationService } from "./text-conversation.service.ts";
 
 // Lista pequena e explícita das ações estruturadas aceitas pelo Conversation
@@ -189,9 +192,16 @@ function resolveMaxMisunderstandingsFromEnv(): number | undefined {
 export type SimulatorRuntimeOptions = {
   domainStore: AgentDomainStore;
   maxMisunderstandings?: number;
-  llmInterpreter?: LlmInterpreter;
-  llmMode?: "DISABLED" | "FALLBACK";
-  maxLlmInputLength?: number;
+  // Fonte única do modo do LLM (BF_LLM_MODE/OPENAI_API_KEY/OPENAI_MODEL) —
+  // resolvida via resolveLlmRuntime/readLlmRuntimeConfig, nunca lida
+  // diretamente de process.env aqui dentro. Default {} ⇒ DISABLED.
+  env?: Record<string, string | undefined>;
+  // Só para testes: cliente OpenAI fake repassado ao provider quando o modo
+  // resolvido é OPENAI_FALLBACK. Nunca criado nem exposto por esta função.
+  openAiClient?: OpenAiResponsesClient;
+  // Só para testes: cliente NVIDIA fake repassado ao provider quando o modo
+  // resolvido é NVIDIA_NEMOTRON. Nunca criado nem exposto por esta função.
+  nvidiaClient?: NvidiaCompatibleClient;
 };
 
 export type SimulatorRuntime = {
@@ -202,10 +212,11 @@ export type SimulatorRuntime = {
 };
 
 // Fábrica isolada do runtime do simulador — extraída para que testes
-// possam instanciar o mesmo runtime com um llmInterpreter fake, sem
-// depender de variável de ambiente nem de spawn de processo. O CLI real
-// (runSimulator) sempre chama isto sem llmInterpreter/llmMode, então a
-// execução via `npm run agent:simulate` continua com o LLM desabilitado.
+// possam instanciar o mesmo runtime com um env e um cliente OpenAI fake
+// explícitos, sem depender de spawn de processo nem de rede. O CLI real
+// (runSimulator) sempre chama isto com env: process.env, então a execução
+// via `npm run agent:simulate` continua resolvendo o modo a partir do
+// ambiente real (DISABLED por padrão, quando BF_LLM_MODE não está setado).
 // Devolve `conversationService` também porque o modo `action` cru do
 // simulador (linha do stdin com `action`, não `text`) continua chamando-o
 // diretamente, sem passar pelo Text Conversation Service.
@@ -213,15 +224,34 @@ export function createSimulatorRuntime(options: SimulatorRuntimeOptions): Simula
   const tools = createAgentTools({ store: options.domainStore });
   const sessionStore = new InMemoryAgentSessionStore();
   const conversationService = createAgentConversationService({ sessionStore, tools });
-  const textService = createTextConversationService({
-    conversationService,
-    sessionStore,
-    tools,
-    maxMisunderstandings: options.maxMisunderstandings,
-    llmInterpreter: options.llmInterpreter,
-    llmMode: options.llmMode,
-    maxLlmInputLength: options.maxLlmInputLength,
+  const llmRuntime = resolveLlmRuntime({
+    env: options.env ?? {},
+    openAiClient: options.openAiClient,
+    nvidiaClient: options.nvidiaClient,
   });
+  const textConversationLlmMode =
+    llmRuntime.llmMode === "DISABLED"
+      ? "DISABLED"
+      : "FALLBACK";
+
+  // O Text Conversation Service não conhece providers: todo runtime ativo
+  // recebe seu interpreter já criado e usa o modo interno FALLBACK.
+  const textService = llmRuntime.llmMode === "DISABLED"
+    ? createTextConversationService({
+        conversationService,
+        sessionStore,
+        tools,
+        maxMisunderstandings: options.maxMisunderstandings,
+        llmMode: textConversationLlmMode,
+      })
+    : createTextConversationService({
+        conversationService,
+        sessionStore,
+        tools,
+        maxMisunderstandings: options.maxMisunderstandings,
+        llmMode: textConversationLlmMode,
+        llmInterpreter: llmRuntime.llmInterpreter,
+      });
   return { tools, sessionStore, conversationService, textService };
 }
 
@@ -247,13 +277,21 @@ async function runSimulator(): Promise<void> {
   console.log = originalLog;
   let runtime: SimulatorRuntime;
   try {
-    runtime = createSimulatorRuntime({ domainStore, maxMisunderstandings: resolveMaxMisunderstandingsFromEnv() });
+    runtime = createSimulatorRuntime({
+      domainStore,
+      maxMisunderstandings: resolveMaxMisunderstandingsFromEnv(),
+      env: process.env,
+    });
   } catch (error) {
+    const code =
+      error instanceof TextConversationServiceError || error instanceof LlmRuntimeConfigError
+        ? error.code
+        : "SIMULATOR_TECHNICAL_ERROR";
     console.log(
       JSON.stringify({
         ok: false,
         error: {
-          code: error instanceof TextConversationServiceError ? error.code : "SIMULATOR_TECHNICAL_ERROR",
+          code,
           message: error instanceof Error ? error.message : "Erro técnico inesperado ao configurar o simulador.",
         },
       }),
