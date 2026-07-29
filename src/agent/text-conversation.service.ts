@@ -26,9 +26,23 @@ import {
   renderTextConversationPolicyMessage,
   type AgentChatMessage,
 } from "./renderer.ts";
-import { isLlmFallbackEligible } from "./llm-eligibility.ts";
-import type { LlmInterpreter, LlmInterpretationResult, InterpretLlmMessageInput } from "./llm-interpreter.types.ts";
-import { executeConversationActionBatch } from "./conversation-action-batch.ts";
+import {
+  isLlmFallbackEligible,
+  DEFAULT_MAX_LLM_INPUT_LENGTH,
+  MIN_MAX_LLM_INPUT_LENGTH,
+  MAX_MAX_LLM_INPUT_LENGTH,
+} from "./llm-eligibility.ts";
+import type {
+  LlmInterpreter,
+  LlmInterpretationResult,
+  LlmInterpretationMatched,
+  LlmInterpretationNotUnderstood,
+  LlmInterpretationAmbiguous,
+  LlmInterpretationRejected,
+  LlmInterpretationProviderError,
+  InterpretLlmMessageInput,
+} from "./llm-interpreter.types.ts";
+import { executeConversationActionBatch, isFailureResult } from "./conversation-action-batch.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -42,11 +56,11 @@ const DEFAULT_MAX_MISUNDERSTANDINGS = 3;
 const MIN_MAX_MISUNDERSTANDINGS = 1;
 const MAX_MAX_MISUNDERSTANDINGS = 10;
 const MAX_PUBLIC_SUGGESTIONS = 5;
+// Sugestões do caminho determinístico são sempre curtas (nome de forma de
+// pagamento, horário de retirada); esse teto mantém as do LLM na mesma escala.
+const MAX_PUBLIC_SUGGESTION_LENGTH = 60;
 
 const DEFAULT_LLM_MODE = "DISABLED" as const;
-const DEFAULT_MAX_LLM_INPUT_LENGTH = 1000;
-const MIN_MAX_LLM_INPUT_LENGTH = 50;
-const MAX_MAX_LLM_INPUT_LENGTH = 10_000;
 
 export type TextConversationPolicyResult = {
   event: string;
@@ -83,9 +97,13 @@ export type ProcessTextInput = {
   text: string;
 };
 
+// `llm` nunca é o LlmInterpretationResult cru: é sempre a forma já reduzida
+// por sanitizeLlmOutcomeForResult() (ver PublicLlmInterpretationResult, mais
+// abaixo). Tipar como o resultado completo prometeria ao chamador campos que
+// esta camada remove de propósito.
 export type TextConversationInterpretationSummary = {
   deterministic: DeterministicInterpretationResult;
-  llm?: LlmInterpretationResult;
+  llm?: PublicLlmInterpretationResult;
   finalSource: "DETERMINISTIC" | "LLM" | "POLICY";
 };
 
@@ -175,9 +193,22 @@ function defaultBuildInterpreterContext(input: { tools: AgentTools }): Determini
   return { products, paymentOptions, pickupSlots: tools.getPickupSlots() };
 }
 
-// Sugestões públicas de NOT_UNDERSTOOD: sem duplicadas, sem vazias, limitadas
-// a um tamanho curto. Nunca inclui candidatos de AMBIGUOUS (esses carregam
-// productId e nunca devem ser expostos).
+// Formas que uma opção sugerida nunca tem numa conversa de pedido — telefone
+// (4+ dígitos seguidos), URL e handle de contato. Uma sugestão com qualquer
+// uma delas é descartada inteira (nunca truncada e mantida): truncar poderia
+// deixar metade de um link ou de um número de contato na mensagem.
+const UNSAFE_SUGGESTION_PATTERN = /\d{4,}|http|www\.|@/i;
+
+// Sugestões públicas de NOT_UNDERSTOOD: sem duplicadas, sem vazias, curtas e
+// sem conteúdo com cara de contato/link. Nunca inclui candidatos de AMBIGUOUS
+// (esses carregam productId e nunca devem ser expostos).
+//
+// Este é o único ponto do fallback em que texto livre gerado pelo modelo chega
+// ao cliente com a voz da marca: toda *ação* proposta é conferida contra o
+// catálogo real, mas as sugestões não passam por nenhuma dessas barreiras. Por
+// isso o filtro é por forma (tamanho e padrão), não por confiança na origem —
+// vale igualmente para as sugestões determinísticas, que já respeitam esses
+// limites naturalmente.
 function publicSuggestions(suggestions: string[] | undefined): string[] {
   if (!Array.isArray(suggestions)) return [];
   const seen = new Set<string>();
@@ -187,6 +218,8 @@ function publicSuggestions(suggestions: string[] | undefined): string[] {
     const trimmed = raw.trim();
     if (!trimmed || seen.has(trimmed)) continue;
     seen.add(trimmed);
+    if (trimmed.length > MAX_PUBLIC_SUGGESTION_LENGTH) continue;
+    if (UNSAFE_SUGGESTION_PATTERN.test(trimmed)) continue;
     out.push(trimmed);
     if (out.length >= MAX_PUBLIC_SUGGESTIONS) break;
   }
@@ -204,23 +237,66 @@ function publicSuggestions(suggestions: string[] | undefined): string[] {
 // aparecer no ProcessTextResult devolvido ao chamador — construímos objetos
 // estreitos em vez de espalhar (`...outcome`) para nunca deixar um campo novo
 // vazar por acidente quando o tipo evoluir.
-function sanitizeLlmOutcomeForResult(outcome: LlmInterpretationResult): LlmInterpretationResult {
+//
+// O tipo de retorno é declarado (nunca um `as`): sem ele, um `as` desligaria
+// justamente a checagem de excesso de propriedades que faz o compilador
+// reclamar quando alguém acrescenta um campo novo — a única barreira
+// automática da função cujo trabalho inteiro é evitar vazamento.
+// Cada branch devolve um destes tipos estreitos anotado explicitamente, para
+// que a checagem de excesso de propriedades valha por branch (e não só contra
+// a união inteira, que aceitaria um campo de qualquer outro membro).
+type PublicLlmMatchedWithoutPromptVersion = Omit<LlmInterpretationMatched, "promptVersion"> & {
+  promptVersion?: never;
+};
+type PublicLlmAmbiguous = Omit<LlmInterpretationAmbiguous, "candidates"> & { candidates?: never };
+type PublicLlmRejected = Omit<LlmInterpretationRejected, "promptVersion"> & { promptVersion?: never };
+
+export type PublicLlmInterpretationResult =
+  | LlmInterpretationMatched
+  | PublicLlmMatchedWithoutPromptVersion
+  | LlmInterpretationNotUnderstood
+  | PublicLlmAmbiguous
+  | PublicLlmRejected
+  | LlmInterpretationProviderError;
+
+// `stripPromptVersion` é usado quando o resultado MATCHED é apenas contexto de
+// um lote que não completou (REJECTED no preflight ou FAILED na execução):
+// nesse caso `actions` continua necessário para ler `execution.failedActionIndex`
+// (que indexa nele), mas `promptVersion` não serve a nada para o chamador. Uma
+// ação MATCHED que de fato executou mantém o `promptVersion` — comportamento
+// já estabelecido, deliberadamente não alterado aqui.
+function sanitizeLlmOutcomeForResult(
+  outcome: LlmInterpretationResult,
+  options?: { stripPromptVersion?: boolean },
+): PublicLlmInterpretationResult {
   if (outcome.status === "REJECTED") {
-    return {
+    const sanitized: PublicLlmRejected = {
       status: "REJECTED",
       source: outcome.source,
       reason: "REJECTED_BY_VALIDATOR",
       durationMs: outcome.durationMs,
-    } as LlmInterpretationResult;
+    };
+    return sanitized;
   }
   if (outcome.status === "AMBIGUOUS") {
-    return {
+    const sanitized: PublicLlmAmbiguous = {
       status: "AMBIGUOUS",
       reason: outcome.reason,
       source: outcome.source,
       promptVersion: outcome.promptVersion,
       durationMs: outcome.durationMs,
     };
+    return sanitized;
+  }
+  if (outcome.status === "MATCHED" && options?.stripPromptVersion) {
+    const sanitized: PublicLlmMatchedWithoutPromptVersion = {
+      status: "MATCHED",
+      actions: outcome.actions,
+      source: outcome.source,
+      ...(outcome.explanationCode !== undefined ? { explanationCode: outcome.explanationCode } : {}),
+      durationMs: outcome.durationMs,
+    };
+    return sanitized;
   }
   return outcome;
 }
@@ -241,9 +317,14 @@ function applySingleAction(params: {
   const { conversationService, sessionStore, channel, contactId, messageId, sessionKey, action } = params;
   const serviceResult = conversationService.processAction({ channel, contactId, messageId, action });
   const engineResult = serviceResult.result;
-  const isInvalidAction = engineResult.messageKey === "INVALID_ACTION";
+  // Só um resultado que o Engine NÃO recusou conta como compreensão bem
+  // sucedida. O predicado vem de conversation-action-batch.ts porque lá mora a
+  // lista autoritativa de messageKeys de recusa (INVALID_ACTION, CART_EMPTY,
+  // PAYMENT_METHOD_UNAVAILABLE etc.) — reconhecer só INVALID_ACTION aqui
+  // zerava o contador numa ação recusada e apagava o progresso rumo ao handoff
+  // automático. Vale igual para o caminho determinístico e para o do LLM.
   let sessionAfter = serviceResult.sessionAfter;
-  const counterReset = !isInvalidAction;
+  const counterReset = !isFailureResult(engineResult);
   if (counterReset && sessionAfter.misunderstandingCount !== 0) {
     sessionAfter = sessionStore.update(sessionKey, current => ({ ...current, misunderstandingCount: 0 }));
   }
@@ -496,7 +577,11 @@ export function createTextConversationService(
           return {
             sessionKey,
             duplicateMessage: false,
-            interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "POLICY" },
+            interpretation: {
+              deterministic: interpretation,
+              llm: sanitizeLlmOutcomeForResult(llmOutcome, { stripPromptVersion: true }),
+              finalSource: "POLICY",
+            },
             sessionBefore,
             sessionAfter: structuredClone(sessionStore.get(sessionKey)!),
             policyResult,
@@ -572,7 +657,12 @@ export function createTextConversationService(
         duplicateMessage: false,
         interpretation: {
           deterministic: interpretation,
-          ...(llmOutcome ? { llm: sanitizeLlmOutcomeForResult(llmOutcome) } : {}),
+          // Um llmOutcome MATCHED só chega até aqui por um lote rejeitado no
+          // preflight — `actions` fica (é o que dá sentido a
+          // `execution.failedActionIndex`, que indexa nele), `promptVersion` sai.
+          ...(llmOutcome
+            ? { llm: sanitizeLlmOutcomeForResult(llmOutcome, { stripPromptVersion: batchResult?.status === "REJECTED" }) }
+            : {}),
           finalSource: "POLICY",
         },
         sessionBefore,

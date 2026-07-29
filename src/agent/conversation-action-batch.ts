@@ -35,7 +35,13 @@ const SOLO_ONLY_ACTION_TYPES: ReadonlySet<AgentConversationAction["type"]> = new
 // carrinho vazio, forma de pagamento indisponível etc.) — nenhum desses
 // lança exceção, então o preflight/execução precisa reconhecer a falha pelo
 // messageKey, não por try/catch.
-const FAILURE_MESSAGE_KEYS: ReadonlySet<string> = new Set([
+//
+// Exportado porque esta é a definição autoritativa de "o Engine recusou a
+// ação" no sistema inteiro: o Text Conversation Service usa o mesmo predicado
+// para decidir se uma ação única (determinística ou vinda do LLM) pode zerar o
+// misunderstandingCount. Duas listas paralelas divergiriam com o tempo e
+// reabririam o buraco na rede de segurança do handoff automático.
+export const FAILURE_MESSAGE_KEYS: ReadonlySet<string> = new Set([
   "INVALID_ACTION",
   "INVALID_PRODUCT",
   "INVALID_QUANTITY",
@@ -51,7 +57,7 @@ const FAILURE_MESSAGE_KEYS: ReadonlySet<string> = new Set([
   "ORDER_CREATION_FAILED",
 ]);
 
-function isFailureResult(result: AgentConversationResult): boolean {
+export function isFailureResult(result: AgentConversationResult): boolean {
   return FAILURE_MESSAGE_KEYS.has(result.messageKey);
 }
 
