@@ -12,6 +12,8 @@ import { createAgentConversationService, type AgentConversationServiceResult } f
 import { buildConversationPresentation } from "./presentation.ts";
 import { renderConversationPresentation } from "./renderer.ts";
 import { createTextConversationService, TextConversationServiceError } from "./text-conversation.service.ts";
+import type { LlmInterpreter } from "./llm-interpreter.types.ts";
+import type { TextConversationService } from "./text-conversation.service.ts";
 
 // Lista pequena e explícita das ações estruturadas aceitas pelo Conversation
 // Engine (src/agent/conversation.types.ts). Mantida aqui só para validação
@@ -184,6 +186,45 @@ function resolveMaxMisunderstandingsFromEnv(): number | undefined {
   return Number(raw);
 }
 
+export type SimulatorRuntimeOptions = {
+  domainStore: AgentDomainStore;
+  maxMisunderstandings?: number;
+  llmInterpreter?: LlmInterpreter;
+  llmMode?: "DISABLED" | "FALLBACK";
+  maxLlmInputLength?: number;
+};
+
+export type SimulatorRuntime = {
+  tools: ReturnType<typeof createAgentTools>;
+  sessionStore: InMemoryAgentSessionStore;
+  conversationService: ReturnType<typeof createAgentConversationService>;
+  textService: TextConversationService;
+};
+
+// Fábrica isolada do runtime do simulador — extraída para que testes
+// possam instanciar o mesmo runtime com um llmInterpreter fake, sem
+// depender de variável de ambiente nem de spawn de processo. O CLI real
+// (runSimulator) sempre chama isto sem llmInterpreter/llmMode, então a
+// execução via `npm run agent:simulate` continua com o LLM desabilitado.
+// Devolve `conversationService` também porque o modo `action` cru do
+// simulador (linha do stdin com `action`, não `text`) continua chamando-o
+// diretamente, sem passar pelo Text Conversation Service.
+export function createSimulatorRuntime(options: SimulatorRuntimeOptions): SimulatorRuntime {
+  const tools = createAgentTools({ store: options.domainStore });
+  const sessionStore = new InMemoryAgentSessionStore();
+  const conversationService = createAgentConversationService({ sessionStore, tools });
+  const textService = createTextConversationService({
+    conversationService,
+    sessionStore,
+    tools,
+    maxMisunderstandings: options.maxMisunderstandings,
+    llmInterpreter: options.llmInterpreter,
+    llmMode: options.llmMode,
+    maxLlmInputLength: options.maxLlmInputLength,
+  });
+  return { tools, sessionStore, conversationService, textService };
+}
+
 async function runSimulator(): Promise<void> {
   if (!process.env.BF_STORE_PATH?.trim()) {
     console.log(
@@ -204,18 +245,9 @@ async function runSimulator(): Promise<void> {
   console.log = (...args: unknown[]) => console.error(...args);
   const domainStore = await loadStoreFile<AgentDomainStore>(storePath, buildSeedDomainStore);
   console.log = originalLog;
-  const tools = createAgentTools({ store: domainStore });
-  const sessionStore = new InMemoryAgentSessionStore();
-  const service = createAgentConversationService({ sessionStore, tools });
-
-  let textService;
+  let runtime: SimulatorRuntime;
   try {
-    textService = createTextConversationService({
-      conversationService: service,
-      sessionStore,
-      tools,
-      maxMisunderstandings: resolveMaxMisunderstandingsFromEnv(),
-    });
+    runtime = createSimulatorRuntime({ domainStore, maxMisunderstandings: resolveMaxMisunderstandingsFromEnv() });
   } catch (error) {
     console.log(
       JSON.stringify({
@@ -229,6 +261,7 @@ async function runSimulator(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const { tools, sessionStore, conversationService, textService } = runtime;
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
@@ -282,7 +315,7 @@ async function runSimulator(): Promise<void> {
       }
 
       const { channel, contactId, messageId, action } = parsed.value;
-      const serviceResult: AgentConversationServiceResult = service.processAction({
+      const serviceResult: AgentConversationServiceResult = conversationService.processAction({
         channel,
         contactId,
         messageId,

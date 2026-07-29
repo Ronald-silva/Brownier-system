@@ -128,7 +128,37 @@ Pontos importantes desta etapa:
 - **Somente ações já existentes no contrato real podem ser retornadas** (`AgentConversationAction`), classificadas e restritas por etapa da conversa (ex.: `CONFIRM_ORDER` só é aceito em `AWAITING_CONFIRMATION`, e nunca combinado com outras alterações no mesmo lote).
 - **Produtos, horários e formas de pagamento precisam existir no contexto público informado** — `productId`/`productName` só resolvem por correspondência exata (nunca fuzzy, nunca a primeira opção em caso de ambiguidade), `pickupTime` só aceita valores exatamente presentes em `pickupSlots` (com a única normalização seed seguro "19h" → "19:00", quando "19:00" já existe na lista), e `paymentMethod` só aceita o valor canônico de `paymentOptions`. Pedidos de entrega (`ENTREGA`/`DELIVERY`) nunca são aceitos.
 - **Nenhuma criação de pedido ocorre nesta camada** — o LLM Interpreter não importa Agent Tools, Orders, Session Store nem calcula preço; ele só produz `AgentConversationAction[]` já validadas, que ainda precisariam passar pelo Conversation Service e pelo Engine (fluxo oficial, inalterado).
-- **A integração com a Text Conversation Service/Interpretation Policy é uma etapa futura** — esta etapa não altera `text-conversation.service.ts`, não é chamada pelo simulador, e não decide quando o LLM deve ser acionado.
+- **A integração com a Text Conversation Service/Interpretation Policy está descrita na próxima seção** — veja "Fallback LLM controlado" logo abaixo para como (e quando) essa infraestrutura é efetivamente acionada.
+
+### Fallback LLM controlado
+
+O Text Conversation Service pode, opcionalmente, encaminhar uma mensagem ao
+LLM Interpreter quando o Deterministic Interpreter não a entende — nunca
+antes dele, e nunca para tudo.
+
+- O interpretador determinístico sempre roda primeiro; o LLM só é chamado
+  depois de um `NOT_UNDERSTOOD`/`AMBIGUOUS` determinístico.
+- O LLM é opcional e desabilitado por padrão (`llmMode: "DISABLED"`). Ativar
+  requer injetar explicitamente `llmInterpreter` (ou `interpretWithLlm`) e
+  `llmMode: "FALLBACK"` na criação do `TextConversationService`.
+- Uma função pura de elegibilidade (`llm-eligibility.ts`) decide, antes de
+  qualquer chamada, se a falha determinística é do tipo que vale a pena
+  tentar de novo com o LLM — bloqueios de segurança/negócio conhecidos
+  (entrega não suportada, pagamento/horário inexistente, handoff ativo,
+  texto que parece instrução ou ação JSON crua, menção a IDs internos, texto
+  acima do limite configurável) nunca chegam ao LLM.
+- A saída do LLM já passa pelo `llm-output-validator.ts` existente antes de
+  chegar aqui — esta camada nunca decide sozinha se uma ação é válida.
+- Uma única ação `MATCHED` do LLM executa pelo mesmo caminho oficial de uma
+  ação determinística (`AgentConversationService` → `Conversation Engine`).
+  Um lote de várias ações passa primeiro por um preflight num Session Store
+  descartável (`conversation-action-batch.ts`) antes de qualquer execução
+  oficial; um lote rejeitado nunca altera a sessão real.
+- Erros técnicos do provider (`PROVIDER_ERROR`, incluindo timeout) nunca
+  contam como incompreensão: não incrementam `misunderstandingCount`, não
+  registram `messageId` (permitindo novo retry) e não disparam handoff.
+- O simulador CLI (`npm run agent:simulate`) continua sempre com o LLM
+  desabilitado — nenhum provider real está conectado nesta etapa.
 
 ## Arquitetura
 
