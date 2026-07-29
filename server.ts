@@ -131,6 +131,10 @@ async function startServer() {
   });
   const adminProductBody = express.json({ limit: "8mb" });
 
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", service: "brownier", timestamp: new Date().toISOString() });
+  });
+
   app.get("/api/public/business", async (_req, res) => res.json((await loadStore()).business));
   app.get("/api/public/menu", async (_req, res) => {
     const store = await loadStore();
@@ -198,8 +202,32 @@ async function startServer() {
   app.delete("/api/admin/products/:id", admin, async (req, res) => { const store = await loadStore(); const before = store.products.length; store.products = store.products.filter(p => p.id !== req.params.id); if (before === store.products.length) return res.status(404).json({ error: "Produto não encontrado." }); await saveStore(store); res.status(204).end(); });
   app.put("/api/admin/orders/:id", admin, async (req, res) => { const store = await loadStore(); const order = store.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: "Pedido não encontrado." }); if (req.body.status && !orderStatuses.includes(req.body.status)) return res.status(400).json({ error: "Status inválido." }); Object.assign(order, { status: req.body.status ?? order.status, internalNotes: typeof req.body.internalNotes === "string" ? req.body.internalNotes.slice(0, 1000) : order.internalNotes, updatedAt: new Date().toISOString() }); await saveStore(store); res.json(order); });
 
-  if (process.env.NODE_ENV !== "production") { const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" }); app.use(vite.middlewares); }
+  let closeVite: (() => Promise<void>) | undefined;
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
+    closeVite = () => vite.close();
+    app.use(vite.middlewares);
+  }
   else { const distPath = path.join(process.cwd(), "dist"); app.use(express.static(distPath)); app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html"))); }
-  app.listen(Number(process.env.PORT || 3000), "0.0.0.0", () => console.log("Brownies Fortal em http://localhost:3000"));
+  const port = Number(process.env.PORT) || 3000;
+  const server = app.listen(port, "0.0.0.0", () => console.log(`Brownies Fortal em http://0.0.0.0:${port}`));
+  let shuttingDown = false;
+  const shutdown = (signal: "SIGTERM" | "SIGINT") => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Recebido ${signal}; encerrando servidor HTTP.`);
+    const closeHttpServer = new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    void Promise.all([closeHttpServer, closeVite?.() ?? Promise.resolve()])
+      .then(() => console.log("Servidor HTTP encerrado."))
+      .catch((error: unknown) => {
+        console.error("Falha ao encerrar o servidor HTTP.", error);
+        process.exitCode = 1;
+      });
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  return server;
 }
 startServer().catch(error => { console.error(error); process.exitCode = 1; });

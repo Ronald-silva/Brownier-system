@@ -194,6 +194,23 @@ para múltiplas réplicas. Railway, Evolution Go e PostgreSQL ainda não estão
 integrados; enquanto essa persistência não for substituída, uma única réplica é
 necessária inicialmente.
 
+### Primeiro deploy controlado no Railway
+
+O build (`npm run build`) gera somente o frontend em `dist/`. O backend é
+iniciado pelo TypeScript nativo do Node 22, por meio de `npm start`, que executa
+`node --experimental-strip-types server.ts`. Configure no Railway ao menos:
+
+```text
+NODE_ENV=production
+ADMIN_ACCESS_CODE=<codigo-forte-e-exclusivo>
+BF_LLM_MODE=DISABLED
+```
+
+O Railway fornece `PORT`; o servidor escuta em `0.0.0.0`. O health check é
+`GET /health` e não consulta LLM, banco ou serviços externos. Não configure
+chaves OpenAI ou NVIDIA para este primeiro deploy. Como o estado ainda é local,
+mantenha uma única réplica.
+
 ## Arquitetura
 
 O Express serve a API e o Vite em desenvolvimento. O catálogo, as configurações e os pedidos são persistidos em JSON para a demonstração local. A regra de preço fica em `src/lib/pricing.ts` e é executada novamente no servidor antes de salvar qualquer pedido; valores enviados pelo navegador são ignorados.
