@@ -204,12 +204,15 @@ iniciado pelo TypeScript nativo do Node 22, por meio de `npm start`, que executa
 NODE_ENV=production
 ADMIN_ACCESS_CODE=<codigo-forte-e-exclusivo>
 BF_LLM_MODE=DISABLED
+DATABASE_URL=<url-do-postgresql-do-railway>
 ```
 
 O Railway fornece `PORT`; o servidor escuta em `0.0.0.0`. O health check é
-`GET /health` e não consulta LLM, banco ou serviços externos. Não configure
-chaves OpenAI ou NVIDIA para este primeiro deploy. Como o estado ainda é local,
-mantenha uma única réplica.
+`GET /health` e verifica apenas `SELECT 1` no PostgreSQL. Ele responde `200`
+quando o banco está conectado e `503` quando não está, sem expor a URL ou o
+erro interno. O catálogo e os pedidos continuam no JSON local; esta etapa não
+cria tabelas nem migra dados. Não configure chaves OpenAI ou NVIDIA para este
+primeiro deploy. Como o estado ainda é local, mantenha uma única réplica.
 
 ## Arquitetura
 

@@ -6,6 +6,8 @@ import { type PricingProduct } from "./src/lib/pricing.ts";
 import { ORDER_STATUSES } from "./src/lib/orderStatuses.ts";
 import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.ts";
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
+import { closeDatabasePool } from "./src/lib/database.ts";
+import { createHealthHandler } from "./src/lib/health.ts";
 
 type Product = PricingProduct & {
   id: string; slug: string; description: string; category: string; imageUrl: string;
@@ -131,9 +133,7 @@ async function startServer() {
   });
   const adminProductBody = express.json({ limit: "8mb" });
 
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "brownier", timestamp: new Date().toISOString() });
-  });
+  app.get("/health", createHealthHandler());
 
   app.get("/api/public/business", async (_req, res) => res.json((await loadStore()).business));
   app.get("/api/public/menu", async (_req, res) => {
@@ -219,7 +219,7 @@ async function startServer() {
     const closeHttpServer = new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
-    void Promise.all([closeHttpServer, closeVite?.() ?? Promise.resolve()])
+    void Promise.all([closeHttpServer, closeVite?.() ?? Promise.resolve(), closeDatabasePool()])
       .then(() => console.log("Servidor HTTP encerrado."))
       .catch((error: unknown) => {
         console.error("Falha ao encerrar o servidor HTTP.", error);
