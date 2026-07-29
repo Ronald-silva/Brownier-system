@@ -154,6 +154,12 @@ antes dele, e nunca para tudo.
   Um lote de várias ações passa primeiro por um preflight num Session Store
   descartável (`conversation-action-batch.ts`) antes de qualquer execução
   oficial; um lote rejeitado nunca altera a sessão real.
+- Limitação conhecida e aceita (não há transação real no Session Store): um
+  lote que **passa** no preflight e mesmo assim falha tecnicamente no meio da
+  execução oficial (`FAILED`) pode deixar o carrinho parcialmente aplicado —
+  as ações anteriores à falha já foram gravadas e não há rollback falso. Nesse
+  caso o `messageId` é deixado deliberadamente sem marcação, para que um retry
+  da mesma mensagem reexecute o lote em vez de ser descartado como duplicado.
 - Erros técnicos do provider (`PROVIDER_ERROR`, incluindo timeout) nunca
   contam como incompreensão: não incrementam `misunderstandingCount`, não
   registram `messageId` (permitindo novo retry) e não disparam handoff.
