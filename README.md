@@ -44,8 +44,30 @@ somente no `.env` local ou no provedor de deploy.
 | `BF_LLM_MODE` | Não | `DISABLED` (padrão), `OPENAI_FALLBACK` ou `NVIDIA_NEMOTRON`. |
 | `OPENAI_*` e limites `BF_LLM_*` | Condicional | Necessários somente em `OPENAI_FALLBACK`. |
 | `NVIDIA_*` | Condicional | Necessários/configuráveis somente em `NVIDIA_NEMOTRON`. |
+| `EVOLUTION_BASE_URL`, `EVOLUTION_INSTANCE_NAME`, `EVOLUTION_INSTANCE_TOKEN` | Condicional | Integração Evolution Go 0.7.2. Devem ser definidos juntos; o token é individual da instância. |
+| `EVOLUTION_WEBHOOK_TOKEN` | Sim, em produção e quando Evolution estiver configurado | Segredo exclusivo do endpoint de webhook do Brownier. |
 
-Não há integração com pagamento, Firebase, WhatsApp ou Evolution no MVP.
+Não há integração com pagamento ou Firebase no MVP. A borda opcional de WhatsApp/Evolution Go está implementada, mas o webhook não é configurado automaticamente.
+
+### Webhook Evolution Go
+
+Quando as variáveis `EVOLUTION_*` estiverem configuradas, o Brownier expõe
+`POST /api/webhooks/evolution-go?token=<EVOLUTION_WEBHOOK_TOKEN>`. O contrato usado é o da **Evolution Go 0.7.2**:
+o evento recebido é `Message`, o texto vem de `data.Message.conversation` ou
+`data.Message.extendedTextMessage.text`, e os metadados vêm de `data.Info`.
+
+O endpoint ignora mensagens próprias (`IsFromMe`), grupos, status e tipos não
+textuais. A deduplicação usa `data.Info.ID` pelo Session Store existente. A
+resposta é enviada via `POST /send/text`, com o token individual em `apikey` e
+`formatJid: true`.
+
+A Evolution Go 0.7.2 envia somente `Content-Type: application/json` no webhook;
+ela não documenta assinatura ou HMAC. Por isso o Brownier protege a própria URL
+com `EVOLUTION_WEBHOOK_TOKEN`, validado em tempo constante antes de ler o payload.
+Em produção, a ausência da variável impede a inicialização. Nunca registre nem
+compartilhe a URL completa do webhook. O adapter usa timeout de 10 segundos nas
+chamadas de envio, não registra tokens, telefones ou payloads, e mantém o LLM
+desabilitado para esse canal.
 
 ## Verificação
 
@@ -190,9 +212,9 @@ antes dele, e nunca para tudo.
 
 O armazenamento de catálogo e pedidos ainda é JSON local, e as sessões, locks
 e limites do agente ainda vivem em memória. Portanto, o sistema não está pronto
-para múltiplas réplicas. Railway, Evolution Go e PostgreSQL ainda não estão
-integrados; enquanto essa persistência não for substituída, uma única réplica é
-necessária inicialmente.
+para múltiplas réplicas. PostgreSQL já atende ao health check e a borda Evolution
+Go foi adicionada, mas o webhook ainda não foi configurado no provedor. Enquanto
+essa persistência não for substituída, uma única réplica é necessária inicialmente.
 
 ### Primeiro deploy controlado no Railway
 

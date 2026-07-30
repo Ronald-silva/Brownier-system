@@ -8,6 +8,13 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
+import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
+import {
+  createEvolutionGoTextSender,
+  createEvolutionGoWebhookHandler,
+  readEvolutionGoConfig,
+  readEvolutionWebhookToken,
+} from "./src/integrations/evolution-go.ts";
 
 type Product = PricingProduct & {
   id: string; slug: string; description: string; category: string; imageUrl: string;
@@ -132,8 +139,26 @@ async function startServer() {
     express.json({ limit: "64kb" })(req, res, next);
   });
   const adminProductBody = express.json({ limit: "8mb" });
+  const evolutionConfig = readEvolutionGoConfig(process.env);
+  const evolutionWebhookToken = readEvolutionWebhookToken(process.env, {
+    production: IS_PRODUCTION,
+    evolutionConfigured: Boolean(evolutionConfig),
+  });
+  const maxMisunderstandingsRaw = process.env.BF_AGENT_MAX_MISUNDERSTANDINGS?.trim();
+  const whatsappConversation = createWhatsappConversationRuntime({
+    loadDomainStore: async () => (await loadStore()) as Store,
+    saveDomainStore: async store => saveStore(store as Store),
+    maxMisunderstandings: maxMisunderstandingsRaw ? Number(maxMisunderstandingsRaw) : undefined,
+  });
+  const evolutionSender = evolutionConfig ? createEvolutionGoTextSender({ config: evolutionConfig }) : undefined;
 
   app.get("/health", createHealthHandler());
+  app.post("/api/webhooks/evolution-go", createEvolutionGoWebhookHandler({
+    config: evolutionConfig,
+    webhookToken: evolutionWebhookToken,
+    conversation: whatsappConversation,
+    sender: evolutionSender,
+  }));
 
   app.get("/api/public/business", async (_req, res) => res.json((await loadStore()).business));
   app.get("/api/public/menu", async (_req, res) => {
