@@ -63,19 +63,6 @@ function isValidQuantity(quantity: number): boolean {
 // --- comandos globais ------------------------------------------------------
 
 const GLOBAL_COMMAND_PHRASES: Record<string, AgentConversationAction> = {
-  menu: { type: "SHOW_MENU" },
-  cardapio: { type: "SHOW_MENU" },
-  "ver menu": { type: "SHOW_MENU" },
-  "ver cardapio": { type: "SHOW_MENU" },
-  "quero ver o cardapio": { type: "SHOW_MENU" },
-  "poderia mandar o menu": { type: "SHOW_MENU" },
-  "manda o menu": { type: "SHOW_MENU" },
-  "quero o menu": { type: "SHOW_MENU" },
-  "quais sao os sabores": { type: "SHOW_MENU" },
-  "o que tem hoje": { type: "SHOW_MENU" },
-  produtos: { type: "SHOW_MENU" },
-  opcoes: { type: "SHOW_MENU" },
-
   cancelar: { type: "CANCEL_CONVERSATION" },
   cancela: { type: "CANCEL_CONVERSATION" },
   desistir: { type: "CANCEL_CONVERSATION" },
@@ -130,22 +117,15 @@ const PHONE_ELIGIBLE_STEPS: ReadonlySet<AgentConversationStep> = new Set([
 
 // --- START -----------------------------------------------------------------
 
-const START_GREETINGS: ReadonlySet<string> = new Set([
-  "oi",
-  "ola",
-  "bom dia",
-  "boa tarde",
-  "boa noite",
-  "ola boa noite",
-  "iniciar",
-  "comecar",
-  "fazer pedido",
-  "quero fazer um pedido",
+const START_GREETINGS: ReadonlyMap<string, "Olá" | "Bom dia" | "Boa tarde" | "Boa noite"> = new Map([
+  ["oi", "Olá"], ["ola", "Olá"], ["bom dia", "Bom dia"], ["boa tarde", "Boa tarde"], ["boa noite", "Boa noite"], ["ola boa noite", "Boa noite"],
+  ["iniciar", "Olá"], ["comecar", "Olá"], ["fazer pedido", "Olá"], ["quero fazer um pedido", "Olá"],
 ]);
 
 function interpretStart(normalizedText: string): DeterministicInterpretationResult {
-  if (START_GREETINGS.has(normalizedText)) {
-    return matched({ type: "START_CONVERSATION" }, "START_GREETING", normalizedText);
+  const greeting = START_GREETINGS.get(normalizedText);
+  if (greeting) {
+    return matched({ type: "START_CONVERSATION", greeting }, "START_GREETING", normalizedText);
   }
   return notUnderstood("GENERIC", normalizedText);
 }

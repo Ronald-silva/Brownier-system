@@ -13,6 +13,8 @@ import type { AgentDomainStore } from "../src/agent/tools.ts";
 import { NvidiaNemotronLlmProviderError } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
 import type { NvidiaCompatibleClient } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
 import { BROWNIER_PICKUP_ADDRESS } from "../src/lib/business-defaults.ts";
+import type { PostgresConversationState } from "../src/agent/postgres-conversation-state.ts";
+import type { AgentSession } from "../src/agent/session.types.ts";
 
 const config: EvolutionGoConfig = {
   baseUrl: "https://evolution.example.test",
@@ -157,6 +159,40 @@ function domainStore(): AgentDomainStore {
   };
 }
 
+function acceptanceStore(): AgentDomainStore {
+  const store = domainStore();
+  store.business.name = "Brownieria Fortal";
+  store.business.address = BROWNIER_PICKUP_ADDRESS;
+  return store;
+}
+
+// Contrato em memória que representa somente a fronteira durável; o adapter
+// Postgres é exercitado em teste próprio. Compartilhá-lo entre dois runtimes
+// simula o restart sem depender de rede ou banco na suíte de aceitação.
+function persistentStateForTest(): PostgresConversationState {
+  const sessions = new Map<string, AgentSession>();
+  const messages = new Map<string, { delivered: boolean; response?: Array<{ type: "text"; text: string }> }>();
+  const key = (input: { channel: string; contactId: string; messageId?: string }) => `${input.channel}:${input.contactId}:${input.messageId ?? ""}`;
+  return {
+    async reserveIncoming(input) {
+      const current = messages.get(key(input));
+      if (!current) { messages.set(key(input), { delivered: false }); return { state: "NEW" }; }
+      if (current.delivered) return { state: "DELIVERED" };
+      return current.response ? { state: "READY", messages: structuredClone(current.response) } : { state: "DELIVERED" };
+    },
+    async loadSession(input) { return sessions.get(`${input.channel}:${input.contactId}`) && structuredClone(sessions.get(`${input.channel}:${input.contactId}`)!); },
+    async saveSession({ session }) { sessions.set(`${session.channel}:${session.contactId}`, structuredClone(session)); },
+    async saveResponse(input) { const current = messages.get(key(input)); if (current) current.response = structuredClone(input.messages); },
+    async markResponseDelivered(input) { const current = messages.get(key(input)); if (current) current.delivered = true; },
+  };
+}
+
+async function deliver(handler: ReturnType<typeof createEvolutionGoWebhookHandler>, payload: Record<string, unknown>) {
+  const response = responseCapture();
+  await handler({ query: { token: "webhook-secret" }, body: payload } as never, response as never, (() => undefined) as never);
+  assert.equal(response.statusCode, 200);
+}
+
 class FakeNvidiaClient implements NvidiaCompatibleClient {
   calls: Record<string, unknown>[] = [];
   chat: NvidiaCompatibleClient["chat"];
@@ -297,7 +333,8 @@ test("runtime WhatsApp preserva a sessão quando a saída NVIDIA é inválida ou
   assert.equal(timeout.policyResult?.event, "POLICY_LLM_TEMPORARILY_UNAVAILABLE");
   assert.equal(timeout.sessionAfter.step, "START");
   assert.equal(timeout.sessionAfter.items.length, 0);
-  assert.match(timeout.messages[0]?.text ?? "", /cardápio|pedido|atendente/i);
+  assert.match(timeout.messages[0]?.text ?? "", /atendente/i);
+  assert.doesNotMatch(timeout.messages[0]?.text ?? "", /cardápio|montar seu pedido/i);
   assert.doesNotMatch(timeout.messages[0]?.text ?? "", /não consegui processar/i);
   const replay = await runtime.processText({ channel: "whatsapp", contactId: "5585888888888", messageId: "nim-timeout", text: "me ajuda com isso" });
   assert.equal(replay.duplicateMessage, true);
@@ -325,4 +362,80 @@ test("runtime WhatsApp serializa duas mensagens rápidas da mesma sessão", asyn
   assert.deepEqual(second.sessionAfter.items, [{ productId: "p1", quantity: 2 }]);
   assert.equal(first.messages.length, 1);
   assert.equal(second.messages.length, 1);
+});
+
+test("aceitação webhook: cada pergunta factual recebe uma única resposta real e na ordem", async () => {
+  const store = acceptanceStore();
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store,
+    saveDomainStore: async () => {},
+    env: NIM_ENV,
+    // Se uma dessas quatro perguntas chamar NIM, o teste falha.
+    nvidiaClient: new FakeNvidiaClient([]),
+  });
+  const sent: Array<{ contactId: string; text: string }> = [];
+  const handler = createEvolutionGoWebhookHandler({
+    config, webhookToken: "webhook-secret", conversation: runtime,
+    sender: { async sendText(message) { sent.push(message); } },
+  });
+  const contactId = "5585444444444";
+  const message = (id: string, text: string) => incoming({
+    data: { Info: { ID: id, Sender: `${contactId}@s.whatsapp.net`, Chat: `${contactId}@s.whatsapp.net`, IsFromMe: false, IsGroup: false, Type: "text" }, Message: { conversation: text } },
+  });
+
+  await deliver(handler, message("accept-greeting", "Boa noite"));
+  await deliver(handler, message("accept-address", "Qual o endereço pra coleta?"));
+  await deliver(handler, message("accept-pickup", "Posso retirar pedido agora?"));
+  await deliver(handler, message("accept-menu", "Poderia me mandar o menu?"));
+
+  assert.equal(sent.length, 4);
+  assert.equal(sent[0]?.text, "Boa noite! Seja bem-vindo à Brownieria Fortal 😊 Como posso ajudar?");
+  assert.match(sent[1]?.text ?? "", new RegExp(BROWNIER_PICKUP_ADDRESS.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(sent[2]?.text, "Ainda não tenho a confirmação do horário de retirada agora. Posso chamar um atendente para confirmar para você.");
+  assert.match(sent[3]?.text ?? "", /Brownie/);
+  assert.deepEqual(sent.map(entry => entry.contactId), [contactId, contactId, contactId, contactId]);
+});
+
+test("aceitação webhook: mensagens rápidas preservam ordem e um replay após restart não reenvia", async () => {
+  const store = acceptanceStore();
+  const durableState = persistentStateForTest();
+  const sent: Array<{ contactId: string; text: string }> = [];
+  const createHandler = () => createEvolutionGoWebhookHandler({
+    config, webhookToken: "webhook-secret",
+    conversation: createWhatsappConversationRuntime({
+      loadDomainStore: async () => store, saveDomainStore: async () => {}, persistentState: durableState,
+      env: NIM_ENV, nvidiaClient: new FakeNvidiaClient([]),
+    }),
+    sender: { async sendText(message) { sent.push(message); } },
+  });
+  const contactId = "5585333333333";
+  const payload = (id: string, text: string) => incoming({
+    data: { Info: { ID: id, Sender: `${contactId}@s.whatsapp.net`, Chat: `${contactId}@s.whatsapp.net`, IsFromMe: false, IsGroup: false, Type: "text" }, Message: { conversation: text } },
+  });
+  const firstRuntimeHandler = createHandler();
+  await Promise.all([
+    deliver(firstRuntimeHandler, payload("rapid-address", "Qual o endereço?")),
+    deliver(firstRuntimeHandler, payload("rapid-hours", "Posso retirar agora?")),
+  ]);
+  assert.equal(sent.length, 2);
+  assert.match(sent[0]?.text ?? "", /Rua Professor Leite Gondim/);
+  assert.match(sent[1]?.text ?? "", /horário de retirada agora/i);
+
+  const restartedHandler = createHandler();
+  await deliver(restartedHandler, payload("rapid-address", "Qual o endereço?"));
+  assert.equal(sent.length, 2);
+});
+
+test("aceitação webhook: falha NVIDIA não substitui uma pergunta factual por fallback genérico", async () => {
+  const store = acceptanceStore();
+  const sent: Array<{ contactId: string; text: string }> = [];
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store, saveDomainStore: async () => {}, env: NIM_ENV,
+    nvidiaClient: new FakeNvidiaClient([new NvidiaNemotronLlmProviderError("NVIDIA_TIMEOUT", true)]),
+  });
+  const handler = createEvolutionGoWebhookHandler({ config, webhookToken: "webhook-secret", conversation: runtime, sender: { async sendText(message) { sent.push(message); } } });
+  await deliver(handler, incoming({ data: { Info: { ID: "nim-factual", Sender: "5585222222222@s.whatsapp.net", Chat: "5585222222222@s.whatsapp.net", IsFromMe: false, IsGroup: false, Type: "text" }, Message: { conversation: "Posso retirar pedido agora?" } } }));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]?.text ?? "", /confirmação do horário de retirada/i);
+  assert.doesNotMatch(sent[0]?.text ?? "", /cardápio|montar seu pedido/i);
 });

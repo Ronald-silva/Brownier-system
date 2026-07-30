@@ -24,7 +24,7 @@ export type AgentPresentationCartItem = {
 };
 
 export type AgentPresentationContext = {
-  business?: { name?: string; phone?: string; whatsapp?: string };
+  business?: { name?: string; phone?: string; whatsapp?: string; greeting?: string };
   products?: AgentPresentationProduct[];
   currentProduct?: AgentPresentationProduct;
   cartItems?: AgentPresentationCartItem[];
@@ -135,6 +135,7 @@ export function buildConversationPresentation(
       name: business.name || undefined,
       phone: business.phone || undefined,
       whatsapp: business.whatsapp || undefined,
+      greeting: typeof data?.greeting === "string" ? data.greeting : undefined,
     };
   }
 

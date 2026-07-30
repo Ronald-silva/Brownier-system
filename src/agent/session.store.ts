@@ -149,6 +149,15 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     return session ? clone(session) : undefined;
   }
 
+  // Hidratação controlada da cópia persistida entre reinícios. O runtime é
+  // responsável por obter a sessão de uma fonte durável antes de processar o
+  // próximo turno; esta classe continua síncrona para o Conversation Engine.
+  restore(session: AgentSession): AgentSession {
+    validateSession(session);
+    this.sessions.set(session.sessionKey, clone(session));
+    return clone(session);
+  }
+
   create(input: CreateAgentSessionInput): AgentSession {
     const sessionKey = buildAgentSessionKey(input.channel, input.contactId);
     if (this.readValid(sessionKey)) {

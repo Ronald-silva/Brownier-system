@@ -102,17 +102,9 @@ test("normalizeInterpreterText remove pontuação de saudações e pedidos de me
 
 // --- Comandos globais ----------------------------------------------------
 
-test("comando global: menu", () => {
+test("menu não é comando global do interpretador determinístico", () => {
   const result = interpret("menu", atStep("COLLECTING_PAYMENT"), PAYMENT_CONTEXT);
-  assertMatched(result);
-  assert.deepEqual(result.action, { type: "SHOW_MENU" });
-  assert.equal(result.confidence, 1);
-});
-
-test("comando global: cardápio (com acento) também mostra o menu", () => {
-  const result = interpret("cardápio", atStep("BROWSING_MENU"));
-  assertMatched(result);
-  assert.deepEqual(result.action, { type: "SHOW_MENU" });
+  assertNotUnderstood(result);
 });
 
 test("comando global: cancelar", () => {
@@ -149,44 +141,34 @@ test("frase vaga 'não sei' não é tratada como cancelar", () => {
 test("START: oi inicia a conversa", () => {
   const result = interpret("oi", atStep("START"));
   assertMatched(result);
-  assert.deepEqual(result.action, { type: "START_CONVERSATION" });
+  assert.equal(result.action.type, "START_CONVERSATION");
 });
 
 test("START: bom dia inicia a conversa", () => {
   const result = interpret("bom dia", atStep("START"));
   assertMatched(result);
-  assert.deepEqual(result.action, { type: "START_CONVERSATION" });
+  assert.equal(result.action.type, "START_CONVERSATION");
 });
 
 for (const greeting of ["olá", "oi", "boa noite", "bom dia", "boa tarde", "olá, boa noite"]) {
   test(`START: saudação '${greeting}' inicia a conversa`, () => {
     const result = interpret(greeting, atStep("START"));
     assertMatched(result);
-    assert.deepEqual(result.action, { type: "START_CONVERSATION" });
+    assert.equal(result.action.type, "START_CONVERSATION");
   });
 }
 
-for (const menuRequest of [
-  "quero ver o cardápio",
-  "poderia mandar o menu?",
-  "manda o menu",
-  "quero o menu",
-  "cardápio",
-  "menu",
-  "quais são os sabores?",
-  "o que tem hoje?",
-]) {
-  test(`pedido de cardápio '${menuRequest}' mostra o menu`, () => {
+for (const menuRequest of ["quero ver o cardápio", "poderia mandar o menu?", "manda o menu", "quero o menu", "cardápio", "menu", "quais são os sabores?", "o que tem hoje?"]) {
+  test(`pedido de cardápio '${menuRequest}' é delegado à camada factual/LLM`, () => {
     const result = interpret(menuRequest, atStep("START"), PRODUCTS_CONTEXT);
-    assertMatched(result);
-    assert.deepEqual(result.action, { type: "SHOW_MENU" });
+    assertNotUnderstood(result);
   });
 }
 
 test("START: quero fazer um pedido inicia a conversa", () => {
   const result = interpret("quero fazer um pedido", atStep("START"));
   assertMatched(result);
-  assert.deepEqual(result.action, { type: "START_CONVERSATION" });
+  assert.equal(result.action.type, "START_CONVERSATION");
 });
 
 test("START: frase desconhecida não inicia a conversa", () => {

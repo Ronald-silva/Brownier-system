@@ -34,7 +34,7 @@ function buildText(messageKey: string, context: AgentPresentationContext, data: 
       const business = d.business as { name?: unknown } | undefined;
       const name = context.business?.name ?? (typeof business?.name === "string" ? business.name : undefined);
       return name
-        ? interpolate(MESSAGE_CATALOG.WELCOME, { businessName: name })
+        ? interpolate(MESSAGE_CATALOG.WELCOME, { businessName: name, greeting: context.business?.greeting ?? "Olá" })
         : MESSAGE_CATALOG.WELCOME_NO_NAME;
     }
 
@@ -225,6 +225,12 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
       break;
     case "BUSINESS_ADDRESS_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_ADDRESS_UNAVAILABLE;
+      break;
+    case "BUSINESS_PICKUP_HOURS":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_PICKUP_HOURS, { hours: data?.hours });
+      break;
+    case "BUSINESS_PICKUP_HOURS_UNAVAILABLE":
+      text = MESSAGE_CATALOG.BUSINESS_PICKUP_HOURS_UNAVAILABLE;
       break;
     default:
       text = MESSAGE_CATALOG.INVALID_ACTION;

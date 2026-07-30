@@ -85,9 +85,9 @@ export function interpolate(template: string, values: AgentPlaceholderValues): s
 }
 
 export const MESSAGE_CATALOG: Record<string, string> = {
-  WELCOME: "Olá! Seja bem-vindo(a) à {businessName}!\n\nVamos montar seu pedido?",
+  WELCOME: "{greeting}! Seja bem-vindo à {businessName} 😊 Como posso ajudar?",
   // Variante usada pelo Renderer quando a apresentação não resolve um nome de negócio.
-  WELCOME_NO_NAME: "Olá! Seja bem-vindo(a)!\n\nVamos montar seu pedido?",
+  WELCOME_NO_NAME: "Olá! Seja bem-vindo 😊 Como posso ajudar?",
   MENU_READY: "🍫 Cardápio\n\n{products}",
   CART_READY: "Seu carrinho está aberto. Envie mais itens ou finalize quando estiver pronto.",
   ITEM_ADDED: "Item adicionado! Quantidade atual: {quantity}x.",
@@ -140,12 +140,15 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   POLICY_LLM_TEMPORARILY_UNAVAILABLE:
     "Não consegui processar sua mensagem agora. Tente novamente em instantes ou peça um atendente.",
   POLICY_LLM_RECOVERY_START:
-    "Posso ajudar com o cardápio ou montar seu pedido. Se preferir, também posso chamar um atendente.",
+    "Ainda não consegui confirmar essa informação agora. Posso chamar um atendente para ajudar você.",
   POLICY_LLM_RECOVERY_ORDER:
     "Seu pedido continua salvo. Você pode enviar mais itens, finalizar quando estiver pronto ou pedir um atendente.",
   BUSINESS_ADDRESS: "O endereço para retirada é:\n\n{address}",
   BUSINESS_ADDRESS_UNAVAILABLE:
     "Ainda não tenho o endereço de retirada confirmado. Posso chamar um atendente para confirmar essa informação.",
+  BUSINESS_PICKUP_HOURS: "O horário informado para retirada é:\n\n{hours}",
+  BUSINESS_PICKUP_HOURS_UNAVAILABLE:
+    "Ainda não tenho a confirmação do horário de retirada agora. Posso chamar um atendente para confirmar para você.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 };
 

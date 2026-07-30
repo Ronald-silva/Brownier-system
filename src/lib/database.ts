@@ -6,7 +6,7 @@ type DatabaseQueryable = {
 
 let databasePool: Pool | undefined;
 
-function getDatabasePool(): Pool {
+export function getDatabasePool(): Pool {
   if (databasePool) return databasePool;
 
   const connectionString = process.env.DATABASE_URL?.trim();

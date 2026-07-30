@@ -43,7 +43,7 @@ import type {
   InterpretLlmMessageInput,
 } from "./llm-interpreter.types.ts";
 import { executeConversationActionBatch, isFailureResult } from "./conversation-action-batch.ts";
-import { resolveCommercialInformationRequest } from "./commercial-information.ts";
+import { resolveFactualIntent } from "./factual-intent.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -460,81 +460,74 @@ export function createTextConversationService(
       const context = buildInterpreterContext({ session: sessionBefore, tools });
       const interpretation = interpretMessage({ text, session: sessionBefore, context });
 
+      // Informações factuais têm precedência sobre o interpretador e o LLM:
+      // vêm do Store real e nunca dependem de inferência do modelo.
+      const factualIntent = resolveFactualIntent({ text, address: tools.getBusinessAddress?.(), hours: tools.getBusinessHours?.() });
+      if (factualIntent?.kind === "MENU") {
+        const { engineResult, sessionAfter, counterReset } = applySingleAction({
+          conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: { type: "SHOW_MENU" },
+        });
+        const presentation = buildConversationPresentation({ result: engineResult, session: sessionAfter, tools });
+        return {
+          sessionKey, duplicateMessage: false,
+          interpretation: { deterministic: interpretation, finalSource: "POLICY" },
+          sessionBefore, sessionAfter, result: { ...engineResult, session: structuredClone(sessionAfter) },
+          messages: renderConversationPresentation(presentation),
+          policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
+        };
+      }
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY") {
+        if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
+        const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
+        const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
+          ? factualIntent.address
+            ? { event: "BUSINESS_ADDRESS", messageKey: "BUSINESS_ADDRESS", data: { address: factualIntent.address } }
+            : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" }
+          : factualIntent.hours
+            ? { event: "BUSINESS_PICKUP_HOURS", messageKey: "BUSINESS_PICKUP_HOURS", data: { hours: factualIntent.hours } }
+            : { event: "BUSINESS_PICKUP_HOURS_UNAVAILABLE", messageKey: "BUSINESS_PICKUP_HOURS_UNAVAILABLE" };
+        return {
+          sessionKey,
+          duplicateMessage: false,
+          interpretation: { deterministic: interpretation, finalSource: "POLICY" },
+          sessionBefore,
+          sessionAfter,
+          policyResult,
+          messages: renderTextConversationPolicyMessage(policyResult),
+          policy: {
+            misunderstandingCountBefore,
+            misunderstandingCountAfter: sessionAfter.misunderstandingCount,
+            handoffTriggered: false,
+            counterReset: false,
+          },
+        };
+      }
+
       if (interpretation.status === "MATCHED") {
         const { engineResult, sessionAfter, counterReset } = applySingleAction({
           conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: interpretation.action,
         });
         const presentation = buildConversationPresentation({ result: engineResult, session: sessionAfter, tools });
         const messages = renderConversationPresentation(presentation);
-
         return {
-          sessionKey,
-          duplicateMessage: false,
+          sessionKey, duplicateMessage: false,
           interpretation: { deterministic: interpretation, finalSource: "DETERMINISTIC" },
-          sessionBefore,
-          sessionAfter,
-          result: { ...engineResult, session: structuredClone(sessionAfter) },
-          messages,
-          policy: {
-            misunderstandingCountBefore,
-            misunderstandingCountAfter: sessionAfter.misunderstandingCount,
-            handoffTriggered: false,
-            counterReset,
-          },
+          sessionBefore, sessionAfter, result: { ...engineResult, session: structuredClone(sessionAfter) }, messages,
+          policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
 
-      // NOT_UNDERSTOOD ou AMBIGUOUS a partir daqui.
-
-      // A própria sessão já está em atendimento humano e o interpretador
-      // sinalizou isso (único caminho que produz essa reason) — mensagem
-      // comum durante handoff ativo: não incrementa, não chama o Engine, só
-      // registra o messageId (deduplicação) e devolve uma resposta segura.
+      // NOT_UNDERSTOOD ou AMBIGUOUS a partir daqui. A sessão em handoff não
+      // chama o Engine nem o provider para mensagens que não são factuais.
       if (interpretation.status === "NOT_UNDERSTOOD" && interpretation.reason === "HUMAN_HANDOFF_ACTIVE") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
-        const policyResult: TextConversationPolicyResult = {
-          event: "HUMAN_HANDOFF_ACTIVE",
-          messageKey: "HUMAN_HANDOFF_ACTIVE",
-        };
+        const policyResult: TextConversationPolicyResult = { event: "HUMAN_HANDOFF_ACTIVE", messageKey: "HUMAN_HANDOFF_ACTIVE" };
         return {
-          sessionKey,
-          duplicateMessage: false,
-          interpretation: { deterministic: interpretation, finalSource: "POLICY" },
-          sessionBefore,
-          sessionAfter,
-          policyResult,
+          sessionKey, duplicateMessage: false,
+          interpretation: { deterministic: interpretation, finalSource: "POLICY" }, sessionBefore, sessionAfter, policyResult,
           messages: renderTextConversationPolicyMessage(policyResult),
-          policy: {
-            misunderstandingCountBefore,
-            misunderstandingCountAfter: misunderstandingCountBefore,
-            handoffTriggered: false,
-            counterReset: false,
-          },
-        };
-      }
-
-      const commercialInformation = resolveCommercialInformationRequest(text, tools.getBusinessAddress?.());
-      if (commercialInformation?.kind === "ADDRESS") {
-        if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
-        const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
-        const policyResult: TextConversationPolicyResult = commercialInformation.address
-          ? { event: "BUSINESS_ADDRESS", messageKey: "BUSINESS_ADDRESS", data: { address: commercialInformation.address } }
-          : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" };
-        return {
-          sessionKey,
-          duplicateMessage: false,
-          interpretation: { deterministic: interpretation, finalSource: "POLICY" },
-          sessionBefore,
-          sessionAfter,
-          policyResult,
-          messages: renderTextConversationPolicyMessage(policyResult),
-          policy: {
-            misunderstandingCountBefore,
-            misunderstandingCountAfter: sessionAfter.misunderstandingCount,
-            handoffTriggered: false,
-            counterReset: false,
-          },
+          policy: { misunderstandingCountBefore, misunderstandingCountAfter: misunderstandingCountBefore, handoffTriggered: false, counterReset: false },
         };
       }
 

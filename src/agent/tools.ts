@@ -90,6 +90,7 @@ export type AgentTools = {
   // Informação comercial pública, mantida separada do resumo de pedido para
   // não ser enviada ao LLM por padrão.
   getBusinessAddress?(): string;
+  getBusinessHours?(): string;
   getPickupSlots(): string[];
   validatePickupTime(time: string): boolean;
   createOrder(input: { payload: CreateOrderPayload; idempotencyKey?: string }): CreateOrderResult;
@@ -151,6 +152,10 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
 
     getBusinessAddress() {
       return typeof store.business.address === "string" ? store.business.address.trim() : "";
+    },
+
+    getBusinessHours() {
+      return typeof store.business.hours === "string" ? store.business.hours.trim() : "";
     },
 
     getPickupSlots() {

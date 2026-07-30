@@ -152,16 +152,16 @@ test("saudação determinística recebe apresentação inicial útil sem provide
   const { textService } = makeStack();
   const result = await textService.processText({ channel: CH, contactId: "greeting-presentation", text: "Olá, boa noite!" });
   assert.equal(result.result?.event, "WELCOME");
-  assert.match(result.messages[0]?.text ?? "", /bem-vindo\(a\)/i);
+  assert.equal(result.messages[0]?.text, "Boa noite! Seja bem-vindo à Brownieria Fortal 😊 Como posso ajudar?");
   assert.equal(result.interpretation?.finalSource, "DETERMINISTIC");
 });
 
-test("pedido determinístico de cardápio retorna os produtos disponíveis sem provider externo", async () => {
+test("pedido factual de cardápio retorna os produtos disponíveis sem provider externo", async () => {
   const { textService } = makeStack();
   const result = await textService.processText({ channel: CH, contactId: "menu-presentation", text: "Quais são os sabores?" });
   assert.equal(result.result?.event, "MENU_READY");
   assert.match(result.messages[0]?.text ?? "", /Brownie de Brigadeiro/);
-  assert.equal(result.interpretation?.finalSource, "DETERMINISTIC");
+  assert.equal(result.interpretation?.finalSource, "POLICY");
 });
 
 const CH = "simulator";
@@ -722,7 +722,7 @@ test("LLM MATCHED com uma ação executa pelo Conversation Service e zera o cont
     interpretMessage: () => notUnderstood("GENERIC"),
     interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
   });
-  const result = await textService.processText({ channel: CH, contactId: "llm-single", text: "mostra o cardápio pra mim" });
+  const result = await textService.processText({ channel: CH, contactId: "llm-single", text: "preciso de ajuda para escolher" });
   assert.equal(result.result?.event, "MENU_READY");
   assert.equal(result.policy.counterReset, true);
   assert.equal(result.interpretation?.finalSource, "LLM");
@@ -863,7 +863,7 @@ test("MATCHED do LLM que de fato executou mantém o promptVersion no retorno", a
     interpretMessage: () => notUnderstood("GENERIC"),
     interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
   });
-  const result = await textService.processText({ channel: CH, contactId: "llm-single-prompt-version", text: "mostra o cardápio" });
+  const result = await textService.processText({ channel: CH, contactId: "llm-single-prompt-version", text: "preciso de ajuda para escolher" });
   assert.equal(result.interpretation?.llm?.status, "MATCHED");
   assert.equal((result.interpretation?.llm as { promptVersion?: string }).promptVersion, "test");
 });
@@ -1189,8 +1189,8 @@ test("duas mensagens diferentes na mesma sessão são serializadas (não corromp
   });
   const contactId = "lock-serialize";
   const [a, b] = await Promise.all([
-    textService.processText({ channel: CH, contactId, messageId: "s-1", text: "abre o cardápio" }),
-    textService.processText({ channel: CH, contactId, messageId: "s-2", text: "abre o cardápio de novo" }),
+    textService.processText({ channel: CH, contactId, messageId: "s-1", text: "mensagem incerta um" }),
+    textService.processText({ channel: CH, contactId, messageId: "s-2", text: "mensagem incerta dois" }),
   ]);
   assert.equal(a.duplicateMessage, false);
   assert.equal(b.duplicateMessage, false);

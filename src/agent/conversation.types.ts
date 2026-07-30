@@ -5,7 +5,7 @@ import type { AgentConversationStep, AgentSession } from "./session.types.ts";
 import type { AgentTools } from "./tools.ts";
 
 export type AgentConversationAction =
-  | { type: "START_CONVERSATION" }
+  | { type: "START_CONVERSATION"; greeting?: "Olá" | "Bom dia" | "Boa tarde" | "Boa noite" }
   | { type: "SHOW_MENU" }
   | { type: "ADD_ITEM"; productId: string; quantity: number }
   | { type: "UPDATE_ITEM_QUANTITY"; productId: string; quantity: number }

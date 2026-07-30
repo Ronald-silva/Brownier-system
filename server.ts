@@ -6,10 +6,11 @@ import { type PricingProduct } from "./src/lib/pricing.ts";
 import { ORDER_STATUSES } from "./src/lib/orderStatuses.ts";
 import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.ts";
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
-import { closeDatabasePool } from "./src/lib/database.ts";
+import { closeDatabasePool, getDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
 import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress } from "./src/lib/business-defaults.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
+import { createPostgresConversationState } from "./src/agent/postgres-conversation-state.ts";
 import {
   createEvolutionGoTextSender,
   createEvolutionGoWebhookHandler,
@@ -155,6 +156,12 @@ async function startServer() {
     loadDomainStore: async () => (await loadStore()) as Store,
     saveDomainStore: async store => saveStore(store as Store),
     maxMisunderstandings: maxMisunderstandingsRaw ? Number(maxMisunderstandingsRaw) : undefined,
+    // O pool é lazy. Em desenvolvimento/testes sem DATABASE_URL o runtime
+    // local continua utilizável; em produção, a primeira mensagem usa o
+    // mesmo pool exigido pelo health check.
+    persistentState: process.env.DATABASE_URL?.trim()
+      ? createPostgresConversationState({ query: (queryText, values) => getDatabasePool().query(queryText, values) })
+      : undefined,
   });
   const evolutionSender = evolutionConfig ? createEvolutionGoTextSender({ config: evolutionConfig }) : undefined;
 

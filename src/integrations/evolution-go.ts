@@ -65,6 +65,7 @@ export type EvolutionGoConversationProcessor = {
     duplicateMessage: boolean;
     messages: Array<{ type: "text"; text: string }>;
   }>;
+  markResponseDelivered?(input: { channel: "whatsapp"; contactId: string; messageId: string }): Promise<void>;
 };
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -196,6 +197,7 @@ export function createEvolutionGoWebhookHandler(input: {
         for (const message of result.messages) {
           await input.sender.sendText({ contactId, text: message.text });
         }
+        await input.conversation.markResponseDelivered?.({ channel: "whatsapp", contactId, messageId });
       }
       res.status(200).json({ status: "accepted" });
     } catch {

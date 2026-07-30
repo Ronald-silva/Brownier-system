@@ -90,7 +90,7 @@ const CLEAR_ORDER_DATA_PATCH: Partial<AgentSession> = {
 
 // --- handlers por ação -------------------------------------------------
 
-function handleStartConversation(session: AgentSession, tools: AgentTools): StepResult {
+function handleStartConversation(session: AgentSession, tools: AgentTools, action: Extract<AgentConversationAction, { type: "START_CONVERSATION" }>): StepResult {
   if (session.step !== "START") return invalidAction(session, { type: "START_CONVERSATION" });
   const business = tools.getBusiness();
   const products = tools.listProducts();
@@ -98,7 +98,7 @@ function handleStartConversation(session: AgentSession, tools: AgentTools): Step
     patch: { step: "BROWSING_MENU" },
     event: "WELCOME",
     messageKey: "WELCOME",
-    data: { business, products },
+    data: { business, products, ...(action.greeting ? { greeting: action.greeting } : {}) },
   };
 }
 
@@ -564,7 +564,7 @@ export function handleConversationAction(input: HandleConversationActionInput): 
   let result: StepResult;
   switch (action.type) {
     case "START_CONVERSATION":
-      result = handleStartConversation(original, tools);
+      result = handleStartConversation(original, tools, action);
       break;
     case "SHOW_MENU": {
       const allowed: AgentConversationStep[] = ["START", "BROWSING_MENU", "BUILDING_ORDER"];
