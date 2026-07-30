@@ -95,6 +95,11 @@ test("normalizeInterpreterText preserva o + de telefone", () => {
   assert.equal(normalizeInterpreterText("+55 85 99999-9999"), "+55 85 99999-9999");
 });
 
+test("normalizeInterpreterText remove pontuação de saudações e pedidos de menu", () => {
+  assert.equal(normalizeInterpreterText("Olá, boa noite!"), "ola boa noite");
+  assert.equal(normalizeInterpreterText("Poderia mandar o menu?"), "poderia mandar o menu");
+});
+
 // --- Comandos globais ----------------------------------------------------
 
 test("comando global: menu", () => {
@@ -152,6 +157,31 @@ test("START: bom dia inicia a conversa", () => {
   assertMatched(result);
   assert.deepEqual(result.action, { type: "START_CONVERSATION" });
 });
+
+for (const greeting of ["olá", "oi", "boa noite", "bom dia", "boa tarde", "olá, boa noite"]) {
+  test(`START: saudação '${greeting}' inicia a conversa`, () => {
+    const result = interpret(greeting, atStep("START"));
+    assertMatched(result);
+    assert.deepEqual(result.action, { type: "START_CONVERSATION" });
+  });
+}
+
+for (const menuRequest of [
+  "quero ver o cardápio",
+  "poderia mandar o menu?",
+  "manda o menu",
+  "quero o menu",
+  "cardápio",
+  "menu",
+  "quais são os sabores?",
+  "o que tem hoje?",
+]) {
+  test(`pedido de cardápio '${menuRequest}' mostra o menu`, () => {
+    const result = interpret(menuRequest, atStep("START"), PRODUCTS_CONTEXT);
+    assertMatched(result);
+    assert.deepEqual(result.action, { type: "SHOW_MENU" });
+  });
+}
 
 test("START: quero fazer um pedido inicia a conversa", () => {
   const result = interpret("quero fazer um pedido", atStep("START"));

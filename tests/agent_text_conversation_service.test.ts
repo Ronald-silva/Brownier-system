@@ -148,6 +148,22 @@ function llmProviderError(retryable: boolean): LlmInterpretationResult {
   return { status: "PROVIDER_ERROR", reason: retryable ? "TIMEOUT" : "PROVIDER_REJECTED", retryable, promptVersion: "test", durationMs: 1 };
 }
 
+test("saudação determinística recebe apresentação inicial útil sem provider externo", async () => {
+  const { textService } = makeStack();
+  const result = await textService.processText({ channel: CH, contactId: "greeting-presentation", text: "Olá, boa noite!" });
+  assert.equal(result.result?.event, "WELCOME");
+  assert.match(result.messages[0]?.text ?? "", /bem-vindo\(a\)/i);
+  assert.equal(result.interpretation?.finalSource, "DETERMINISTIC");
+});
+
+test("pedido determinístico de cardápio retorna os produtos disponíveis sem provider externo", async () => {
+  const { textService } = makeStack();
+  const result = await textService.processText({ channel: CH, contactId: "menu-presentation", text: "Quais são os sabores?" });
+  assert.equal(result.result?.event, "MENU_READY");
+  assert.match(result.messages[0]?.text ?? "", /Brownie de Brigadeiro/);
+  assert.equal(result.interpretation?.finalSource, "DETERMINISTIC");
+});
+
 const CH = "simulator";
 
 // --- 1-6: configuração de maxMisunderstandings ---

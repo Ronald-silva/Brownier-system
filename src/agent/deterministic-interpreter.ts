@@ -33,7 +33,9 @@ export function normalizeInterpreterText(text: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, " ");
+    .replace(/[.,!?;…]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // --- construtores de resultado --------------------------------------------
@@ -65,6 +67,12 @@ const GLOBAL_COMMAND_PHRASES: Record<string, AgentConversationAction> = {
   cardapio: { type: "SHOW_MENU" },
   "ver menu": { type: "SHOW_MENU" },
   "ver cardapio": { type: "SHOW_MENU" },
+  "quero ver o cardapio": { type: "SHOW_MENU" },
+  "poderia mandar o menu": { type: "SHOW_MENU" },
+  "manda o menu": { type: "SHOW_MENU" },
+  "quero o menu": { type: "SHOW_MENU" },
+  "quais sao os sabores": { type: "SHOW_MENU" },
+  "o que tem hoje": { type: "SHOW_MENU" },
   produtos: { type: "SHOW_MENU" },
   opcoes: { type: "SHOW_MENU" },
 
@@ -128,6 +136,7 @@ const START_GREETINGS: ReadonlySet<string> = new Set([
   "bom dia",
   "boa tarde",
   "boa noite",
+  "ola boa noite",
   "iniciar",
   "comecar",
   "fazer pedido",
