@@ -216,7 +216,15 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
       text = MESSAGE_CATALOG.POLICY_HUMAN_HANDOFF_ACTIVE;
       break;
     case "POLICY_LLM_TEMPORARILY_UNAVAILABLE":
-      text = MESSAGE_CATALOG.POLICY_LLM_TEMPORARILY_UNAVAILABLE;
+      text = data?.recovery === "ORDER"
+        ? MESSAGE_CATALOG.POLICY_LLM_RECOVERY_ORDER
+        : MESSAGE_CATALOG.POLICY_LLM_RECOVERY_START;
+      break;
+    case "BUSINESS_ADDRESS":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_ADDRESS, { address: data?.address });
+      break;
+    case "BUSINESS_ADDRESS_UNAVAILABLE":
+      text = MESSAGE_CATALOG.BUSINESS_ADDRESS_UNAVAILABLE;
       break;
     default:
       text = MESSAGE_CATALOG.INVALID_ACTION;

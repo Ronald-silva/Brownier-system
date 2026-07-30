@@ -8,6 +8,7 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
+import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress } from "./src/lib/business-defaults.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
 import {
   createEvolutionGoTextSender,
@@ -85,7 +86,7 @@ function verifyAdminSessionToken(token: string | undefined): boolean {
 const demoStore: Store = {
   business: {
     name: "Brownieria Fortal", tagline: "Brownies artesanais para tornar seu dia mais doce", description: "Veja os sabores disponíveis hoje e monte seu pedido em poucos minutos.",
-    phone: "", whatsapp: "", address: "", hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
+    phone: "", whatsapp: "", address: BROWNIER_PICKUP_ADDRESS, hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
     pickupSlots: [],
     paymentMethods: ["PIX", "DINHEIRO", "A_COMBINAR"], deliveryFee: 0,
     receivedMessage: "Recebemos seu pedido! A equipe vai confirmar os detalhes em breve.",
@@ -108,7 +109,12 @@ const demoStore: Store = {
   orders: [],
 };
 
-async function loadStore(): Promise<Store> { return loadStoreFile(storePath, () => demoStore); }
+async function loadStore(): Promise<Store> {
+  const store = await loadStoreFile(storePath, () => demoStore);
+  const withOfficialAddress = ensureBrownierPickupAddress(store);
+  if (withOfficialAddress !== store) await saveStore(withOfficialAddress);
+  return withOfficialAddress;
+}
 async function saveStore(store: Store) { return saveStoreFile(storePath, store); }
 function publicProduct(product: Product) {
   const { id, slug, name, description, category, imageUrl, basePrice, promotionalPrice, minimumPromotionalQuantity, isAvailable, isFeatured, displayOrder, ingredients, allergens, updatedAt } = product;

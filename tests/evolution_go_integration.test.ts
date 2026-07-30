@@ -12,6 +12,7 @@ import { createWhatsappConversationRuntime } from "../src/agent/whatsapp-convers
 import type { AgentDomainStore } from "../src/agent/tools.ts";
 import { NvidiaNemotronLlmProviderError } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
 import type { NvidiaCompatibleClient } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
+import { BROWNIER_PICKUP_ADDRESS } from "../src/lib/business-defaults.ts";
 
 const config: EvolutionGoConfig = {
   baseUrl: "https://evolution.example.test",
@@ -196,11 +197,51 @@ test("runtime WhatsApp usa o fluxo real determinístico e a mesma sessão por co
   const second = await runtime.processText({ channel: "whatsapp", contactId: "5585999999999", messageId: "m2", text: "cardápio" });
   const replay = await runtime.processText({ channel: "whatsapp", contactId: "5585999999999", messageId: "m2", text: "cardápio" });
   assert.equal(first.result?.event, "WELCOME");
+  assert.equal(first.messages.length, 1);
+  assert.doesNotMatch(first.messages[0]?.text ?? "", /cardápio/i);
   assert.equal(second.result?.event, "MENU_READY");
   assert.equal(second.sessionBefore.sessionKey, first.sessionAfter.sessionKey);
   assert.equal(replay.duplicateMessage, true);
   assert.deepEqual(replay.messages, []);
   assert.equal(saves, 0);
+});
+
+test("runtime WhatsApp responde endereço com dado real do Store e não consulta NVIDIA", async () => {
+  const store = domainStore();
+  store.business.address = BROWNIER_PICKUP_ADDRESS;
+  const nvidiaClient = new FakeNvidiaClient([]);
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store,
+    saveDomainStore: async () => {},
+    env: NIM_ENV,
+    nvidiaClient,
+  });
+  const result = await runtime.processText({
+    channel: "whatsapp", contactId: "5585777777777", messageId: "address-1", text: "Qual o endereço de coleta?",
+  });
+  assert.equal(result.policyResult?.event, "BUSINESS_ADDRESS");
+  assert.equal(result.messages.length, 1);
+  assert.match(result.messages[0]?.text ?? "", /Rua Professor Leite Gondim, 896/);
+  assert.equal(nvidiaClient.calls.length, 0);
+});
+
+test("runtime WhatsApp trata endereço ausente como informação comercial pendente, sem chamar NVIDIA", async () => {
+  const store = domainStore();
+  const nvidiaClient = new FakeNvidiaClient([]);
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store,
+    saveDomainStore: async () => {},
+    env: NIM_ENV,
+    nvidiaClient,
+  });
+  const result = await runtime.processText({
+    channel: "whatsapp", contactId: "5585666666666", messageId: "address-2", text: "Onde fica a retirada?",
+  });
+  assert.equal(result.policyResult?.event, "BUSINESS_ADDRESS_UNAVAILABLE");
+  assert.equal(result.messages.length, 1);
+  assert.match(result.messages[0]?.text ?? "", /atendente/i);
+  assert.doesNotMatch(result.messages[0]?.text ?? "", /não consegui processar/i);
+  assert.equal(nvidiaClient.calls.length, 0);
 });
 
 test("runtime WhatsApp usa NVIDIA como fallback para linguagem natural, mantém contexto e usa o catálogo real", async () => {
@@ -256,4 +297,32 @@ test("runtime WhatsApp preserva a sessão quando a saída NVIDIA é inválida ou
   assert.equal(timeout.policyResult?.event, "POLICY_LLM_TEMPORARILY_UNAVAILABLE");
   assert.equal(timeout.sessionAfter.step, "START");
   assert.equal(timeout.sessionAfter.items.length, 0);
+  assert.match(timeout.messages[0]?.text ?? "", /cardápio|pedido|atendente/i);
+  assert.doesNotMatch(timeout.messages[0]?.text ?? "", /não consegui processar/i);
+  const replay = await runtime.processText({ channel: "whatsapp", contactId: "5585888888888", messageId: "nim-timeout", text: "me ajuda com isso" });
+  assert.equal(replay.duplicateMessage, true);
+});
+
+test("runtime WhatsApp serializa duas mensagens rápidas da mesma sessão", async () => {
+  const store = domainStore();
+  const nvidiaClient = new FakeNvidiaClient([
+    '{"status":"MATCHED","actions":[{"type":"START_CONVERSATION"}]}',
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"p1","quantity":2}]}',
+  ]);
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store,
+    saveDomainStore: async () => {},
+    env: NIM_ENV,
+    nvidiaClient,
+  });
+  const contactId = "5585555555555";
+  const [first, second] = await Promise.all([
+    runtime.processText({ channel: "whatsapp", contactId, messageId: "rapid-1", text: "estou pensando em brownies" }),
+    runtime.processText({ channel: "whatsapp", contactId, messageId: "rapid-2", text: "quero dois" }),
+  ]);
+  assert.equal(first.sessionAfter.step, "BROWSING_MENU");
+  assert.equal(second.sessionBefore.step, "BROWSING_MENU");
+  assert.deepEqual(second.sessionAfter.items, [{ productId: "p1", quantity: 2 }]);
+  assert.equal(first.messages.length, 1);
+  assert.equal(second.messages.length, 1);
 });

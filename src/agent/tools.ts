@@ -87,6 +87,9 @@ export type AgentTools = {
   listProducts(): AgentPublicProduct[];
   getProduct(productId: string): AgentPublicProduct | null;
   getBusiness(): AgentPublicBusiness;
+  // Informação comercial pública, mantida separada do resumo de pedido para
+  // não ser enviada ao LLM por padrão.
+  getBusinessAddress?(): string;
   getPickupSlots(): string[];
   validatePickupTime(time: string): boolean;
   createOrder(input: { payload: CreateOrderPayload; idempotencyKey?: string }): CreateOrderResult;
@@ -144,6 +147,10 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
         availabilityNotice: typeof business.availabilityNotice === "string" ? business.availabilityNotice : "",
         paymentMethods: Array.isArray(business.paymentMethods) ? [...business.paymentMethods] : [],
       };
+    },
+
+    getBusinessAddress() {
+      return typeof store.business.address === "string" ? store.business.address.trim() : "";
     },
 
     getPickupSlots() {

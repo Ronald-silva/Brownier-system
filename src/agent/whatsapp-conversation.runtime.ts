@@ -1,7 +1,7 @@
 import { createAgentConversationService } from "./conversation.service.ts";
 import { resolveLlmRuntime } from "./llm-runtime.ts";
 import type { NvidiaCompatibleClient } from "./providers/nvidia-nemotron-llm-provider.ts";
-import { InMemoryAgentSessionStore } from "./session.store.ts";
+import { buildAgentSessionKey, InMemoryAgentSessionStore } from "./session.store.ts";
 import { createTextConversationService, type ProcessTextResult } from "./text-conversation.service.ts";
 import { createAgentTools, type AgentDomainStore } from "./tools.ts";
 
@@ -26,27 +26,42 @@ export function createWhatsappConversationRuntime(input: {
   });
   const llmMode = llmRuntime.llmMode === "DISABLED" ? "DISABLED" : "FALLBACK";
   const llmInterpreter = llmRuntime.llmMode === "DISABLED" ? undefined : llmRuntime.llmInterpreter;
+  const sessionLocks = new Map<string, Promise<unknown>>();
+
+  function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = sessionLocks.get(key) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    const tracked = run.catch(() => {});
+    sessionLocks.set(key, tracked);
+    run.finally(() => {
+      if (sessionLocks.get(key) === tracked) sessionLocks.delete(key);
+    }).catch(() => {});
+    return run;
+  }
 
   return {
     async processText(message) {
-      const store = await input.loadDomainStore();
-      const orderCountBefore = store.orders.length;
-      const tools = createAgentTools({ store });
-      const conversationService = createAgentConversationService({ sessionStore, tools });
-      // O interpretador determinístico continua sendo a primeira camada. O
-      // NIM só entra no fallback para linguagem natural elegível; toda saída
-      // ainda passa pelo validator e pelo Conversation Engine.
-      const textService = createTextConversationService({
-        conversationService,
-        sessionStore,
-        tools,
-        maxMisunderstandings: input.maxMisunderstandings,
-        llmMode,
-        ...(llmInterpreter === undefined ? {} : { llmInterpreter }),
+      const sessionKey = buildAgentSessionKey(message.channel, message.contactId);
+      return withSessionLock(sessionKey, async () => {
+        const store = await input.loadDomainStore();
+        const orderCountBefore = store.orders.length;
+        const tools = createAgentTools({ store });
+        const conversationService = createAgentConversationService({ sessionStore, tools });
+        // O interpretador determinístico continua sendo a primeira camada. O
+        // NIM só entra no fallback para linguagem natural elegível; toda saída
+        // ainda passa pelo validator e pelo Conversation Engine.
+        const textService = createTextConversationService({
+          conversationService,
+          sessionStore,
+          tools,
+          maxMisunderstandings: input.maxMisunderstandings,
+          llmMode,
+          ...(llmInterpreter === undefined ? {} : { llmInterpreter }),
+        });
+        const result = await textService.processText(message);
+        if (store.orders.length !== orderCountBefore) await input.saveDomainStore(store);
+        return result;
       });
-      const result = await textService.processText(message);
-      if (store.orders.length !== orderCountBefore) await input.saveDomainStore(store);
-      return result;
     },
   };
 }

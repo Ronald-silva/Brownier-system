@@ -1096,7 +1096,7 @@ test("timeout (PROVIDER_ERROR retryable) não incrementa o contador nem dispara 
   assert.equal(result.sessionAfter.underHumanHandoff, false);
 });
 
-test("PROVIDER_ERROR não registra o messageId — retry do mesmo id chama o provider de novo", async () => {
+test("PROVIDER_ERROR registra o messageId para não repetir uma resposta de fallback", async () => {
   let calls = 0;
   const { textService, sessionStore } = makeStack({
     llmMode: "FALLBACK",
@@ -1105,9 +1105,10 @@ test("PROVIDER_ERROR não registra o messageId — retry do mesmo id chama o pro
   });
   await textService.processText({ channel: CH, contactId: "llm-provider-no-mark", messageId: "retry-1", text: "algo complexo" });
   const sessionKey = buildAgentSessionKey(CH, "llm-provider-no-mark");
-  assert.equal(sessionStore.hasProcessedMessage(sessionKey, "retry-1"), false);
-  await textService.processText({ channel: CH, contactId: "llm-provider-no-mark", messageId: "retry-1", text: "algo complexo" });
-  assert.equal(calls, 2);
+  assert.equal(sessionStore.hasProcessedMessage(sessionKey, "retry-1"), true);
+  const replay = await textService.processText({ channel: CH, contactId: "llm-provider-no-mark", messageId: "retry-1", text: "algo complexo" });
+  assert.equal(replay.duplicateMessage, true);
+  assert.equal(calls, 1);
 });
 
 test("usuário recebe mensagem segura de indisponibilidade temporária, sem mencionar IA/modelo/provider", async () => {
@@ -1117,7 +1118,8 @@ test("usuário recebe mensagem segura de indisponibilidade temporária, sem menc
     interpretWithLlm: async () => llmProviderError(false),
   });
   const result = await textService.processText({ channel: CH, contactId: "llm-provider-message", text: "algo complexo" });
-  assert.match(result.messages[0]!.text, /Não consegui processar sua mensagem agora/);
+  assert.match(result.messages[0]!.text, /cardápio|pedido|atendente/i);
+  assert.doesNotMatch(result.messages[0]!.text, /Não consegui processar sua mensagem agora/);
   assert.doesNotMatch(result.messages[0]!.text, /intelig[êe]ncia artificial|modelo|provider|timeout|api/i);
 });
 

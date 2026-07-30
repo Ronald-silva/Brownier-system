@@ -43,6 +43,7 @@ import type {
   InterpretLlmMessageInput,
 } from "./llm-interpreter.types.ts";
 import { executeConversationActionBatch, isFailureResult } from "./conversation-action-batch.ts";
+import { resolveCommercialInformationRequest } from "./commercial-information.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -373,6 +374,10 @@ function applySingleAction(params: {
   return { engineResult, sessionAfter, counterReset };
 }
 
+function llmRecoveryKind(session: AgentSession): "START" | "ORDER" {
+  return session.step === "START" || session.step === "BROWSING_MENU" ? "START" : "ORDER";
+}
+
 export function createTextConversationService(
   deps: CreateTextConversationServiceDependencies,
 ): TextConversationService {
@@ -509,6 +514,30 @@ export function createTextConversationService(
         };
       }
 
+      const commercialInformation = resolveCommercialInformationRequest(text, tools.getBusinessAddress?.());
+      if (commercialInformation?.kind === "ADDRESS") {
+        if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
+        const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
+        const policyResult: TextConversationPolicyResult = commercialInformation.address
+          ? { event: "BUSINESS_ADDRESS", messageKey: "BUSINESS_ADDRESS", data: { address: commercialInformation.address } }
+          : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" };
+        return {
+          sessionKey,
+          duplicateMessage: false,
+          interpretation: { deterministic: interpretation, finalSource: "POLICY" },
+          sessionBefore,
+          sessionAfter,
+          policyResult,
+          messages: renderTextConversationPolicyMessage(policyResult),
+          policy: {
+            misunderstandingCountBefore,
+            misunderstandingCountAfter: sessionAfter.misunderstandingCount,
+            handoffTriggered: false,
+            counterReset: false,
+          },
+        };
+      }
+
       let llmOutcome: LlmInterpretationResult | undefined;
       if (llmEnabled) {
         const eligibility = isLlmFallbackEligible({
@@ -523,10 +552,12 @@ export function createTextConversationService(
       }
 
       if (llmOutcome?.status === "PROVIDER_ERROR") {
+        if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfterUnchanged = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = {
           event: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
           messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+          data: { recovery: llmRecoveryKind(sessionBefore) },
         };
         return {
           sessionKey,
@@ -612,9 +643,11 @@ export function createTextConversationService(
         }
 
         if (batchResult.status === "FAILED") {
+          if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
           const policyResult: TextConversationPolicyResult = {
             event: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
             messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+            data: { recovery: llmRecoveryKind(sessionBefore) },
           };
           return {
             sessionKey,

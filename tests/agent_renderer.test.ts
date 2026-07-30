@@ -303,7 +303,8 @@ test("renderTextConversationPolicyMessage renderiza POLICY_LLM_TEMPORARILY_UNAVA
   const messages = renderTextConversationPolicyMessage({ messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE" });
   assert.equal(messages.length, 1);
   assert.equal(messages[0]!.metadata?.policyMessageKey, "POLICY_LLM_TEMPORARILY_UNAVAILABLE");
-  assert.match(messages[0]!.text, /Não consegui processar sua mensagem agora/);
+  assert.match(messages[0]!.text, /cardápio|pedido|atendente/i);
+  assert.doesNotMatch(messages[0]!.text, /Não consegui processar sua mensagem agora/);
 });
 
 test("Renderer não importa Agent Tools", async () => {

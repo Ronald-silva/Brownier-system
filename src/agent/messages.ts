@@ -139,6 +139,13 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   POLICY_HUMAN_HANDOFF_ACTIVE: "Seu atendimento já foi encaminhado para uma pessoa. Aguarde o contato.",
   POLICY_LLM_TEMPORARILY_UNAVAILABLE:
     "Não consegui processar sua mensagem agora. Tente novamente em instantes ou peça um atendente.",
+  POLICY_LLM_RECOVERY_START:
+    "Posso ajudar com o cardápio ou montar seu pedido. Se preferir, também posso chamar um atendente.",
+  POLICY_LLM_RECOVERY_ORDER:
+    "Seu pedido continua salvo. Você pode enviar mais itens, finalizar quando estiver pronto ou pedir um atendente.",
+  BUSINESS_ADDRESS: "O endereço para retirada é:\n\n{address}",
+  BUSINESS_ADDRESS_UNAVAILABLE:
+    "Ainda não tenho o endereço de retirada confirmado. Posso chamar um atendente para confirmar essa informação.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 };
 
