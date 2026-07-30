@@ -10,6 +10,8 @@ import {
 } from "../src/integrations/evolution-go.ts";
 import { createWhatsappConversationRuntime } from "../src/agent/whatsapp-conversation.runtime.ts";
 import type { AgentDomainStore } from "../src/agent/tools.ts";
+import { NvidiaNemotronLlmProviderError } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
+import type { NvidiaCompatibleClient } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
 
 const config: EvolutionGoConfig = {
   baseUrl: "https://evolution.example.test",
@@ -154,6 +156,35 @@ function domainStore(): AgentDomainStore {
   };
 }
 
+class FakeNvidiaClient implements NvidiaCompatibleClient {
+  calls: Record<string, unknown>[] = [];
+  chat: NvidiaCompatibleClient["chat"];
+  private readonly outputs: Array<string | Error>;
+
+  constructor(outputs: Array<string | Error>) {
+    this.outputs = outputs;
+    this.chat = {
+      completions: {
+        create: async (params: Record<string, unknown>) => {
+          this.calls.push(params);
+          const output = this.outputs.shift();
+          if (output instanceof Error) throw output;
+          return { choices: [{ message: { content: output ?? '{"status":"NOT_UNDERSTOOD","reason":"GENERIC"}' } }] };
+        },
+      },
+    };
+  }
+}
+
+const NIM_ENV = {
+  BF_LLM_MODE: "NVIDIA_NEMOTRON",
+  NVIDIA_API_KEY: "nvapi-test-only-not-a-real-key",
+  NVIDIA_MODEL: "nvidia/test-model",
+  NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1",
+  BF_LLM_MAX_REQUESTS_PER_MINUTE: "10",
+  BF_LLM_MAX_CONCURRENT_REQUESTS: "2",
+};
+
 test("runtime WhatsApp usa o fluxo real determinístico e a mesma sessão por contato", async () => {
   const store = domainStore();
   let saves = 0;
@@ -170,4 +201,59 @@ test("runtime WhatsApp usa o fluxo real determinístico e a mesma sessão por co
   assert.equal(replay.duplicateMessage, true);
   assert.deepEqual(replay.messages, []);
   assert.equal(saves, 0);
+});
+
+test("runtime WhatsApp usa NVIDIA como fallback para linguagem natural, mantém contexto e usa o catálogo real", async () => {
+  const store = domainStore();
+  const nvidiaClient = new FakeNvidiaClient([
+    '{"status":"MATCHED","actions":[{"type":"START_CONVERSATION"}]}',
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"p1","quantity":20}]}',
+    '{"status":"MATCHED","actions":[{"type":"SHOW_MENU"}]}',
+  ]);
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store,
+    saveDomainStore: async () => {},
+    env: NIM_ENV,
+    nvidiaClient,
+  });
+  const contactId = "5585999999999";
+  const interest = await runtime.processText({ channel: "whatsapp", contactId, messageId: "nim-1", text: "estou querendo uns brownies" });
+  const quantity = await runtime.processText({ channel: "whatsapp", contactId, messageId: "nim-2", text: "qro vinte" });
+  const price = await runtime.processText({ channel: "whatsapp", contactId, messageId: "nim-3", text: "quanto custa?" });
+  const replay = await runtime.processText({ channel: "whatsapp", contactId, messageId: "nim-3", text: "quanto custa?" });
+
+  assert.equal(interest.interpretation?.finalSource, "LLM");
+  assert.equal(quantity.interpretation?.finalSource, "LLM");
+  assert.equal(quantity.sessionBefore.step, "BROWSING_MENU");
+  assert.equal(quantity.sessionAfter.step, "BUILDING_ORDER");
+  assert.deepEqual(quantity.sessionAfter.items, [{ productId: "p1", quantity: 20 }]);
+  assert.equal(price.result?.event, "MENU_READY");
+  assert.match(price.messages[0]?.text ?? "", /Brownie/);
+  assert.match(price.messages[0]?.text ?? "", /R\$\s*5,00/);
+  assert.equal(replay.duplicateMessage, true);
+  assert.equal(nvidiaClient.calls.length, 3);
+  assert.ok(!JSON.stringify(nvidiaClient.calls).includes(contactId));
+});
+
+test("runtime WhatsApp preserva a sessão quando a saída NVIDIA é inválida ou quando o provider falha", async () => {
+  const store = domainStore();
+  const nvidiaClient = new FakeNvidiaClient([
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"inventado","quantity":1}]}',
+    new NvidiaNemotronLlmProviderError("NVIDIA_TIMEOUT", true),
+  ]);
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store,
+    saveDomainStore: async () => {},
+    env: NIM_ENV,
+    nvidiaClient,
+  });
+  const invalid = await runtime.processText({ channel: "whatsapp", contactId: "5585888888888", messageId: "nim-invalid", text: "quero um brownie raro" });
+  const timeout = await runtime.processText({ channel: "whatsapp", contactId: "5585888888888", messageId: "nim-timeout", text: "me ajuda com isso" });
+
+  assert.equal(invalid.interpretation?.llm?.status, "REJECTED");
+  assert.equal(invalid.sessionAfter.step, "START");
+  assert.equal(invalid.sessionAfter.items.length, 0);
+  assert.equal(timeout.policyResult?.event, "POLICY_LLM_TEMPORARILY_UNAVAILABLE");
+  assert.equal(timeout.sessionAfter.step, "START");
+  assert.equal(timeout.sessionAfter.items.length, 0);
 });

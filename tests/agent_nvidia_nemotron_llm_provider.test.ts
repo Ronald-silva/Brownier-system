@@ -449,3 +449,51 @@ test("no network call occurs when a fake client is injected", async () => {
   await provider.generateStructuredOutput(BASE_REQUEST);
   assert.equal(client.calls.length, 2);
 });
+
+test("aplica rate limit local antes de chamar o NVIDIA", async () => {
+  const client = fixedClient("{}");
+  const provider = createNvidiaNemotronLlmProvider({
+    apiKey: FAKE_API_KEY,
+    client,
+    maxRequestsPerMinute: 1,
+  });
+  await provider.generateStructuredOutput(BASE_REQUEST);
+  await assert.rejects(
+    () => provider.generateStructuredOutput(BASE_REQUEST),
+    (error: unknown) => {
+      assert.ok(error instanceof NvidiaNemotronLlmProviderError);
+      assert.equal(error.code, "LOCAL_RATE_LIMIT");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(client.calls.length, 1);
+});
+
+test("aplica limite local de concorrência antes de chamar o NVIDIA", async () => {
+  let release: (() => void) | undefined;
+  const client = new FakeNvidiaClient(async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return { choices: [{ message: { content: "{}" } }] };
+  });
+  const provider = createNvidiaNemotronLlmProvider({
+    apiKey: FAKE_API_KEY,
+    client,
+    maxRequestsPerMinute: 10,
+    maxConcurrentRequests: 1,
+  });
+  const inFlight = provider.generateStructuredOutput(BASE_REQUEST);
+  await Promise.resolve();
+  await assert.rejects(
+    () => provider.generateStructuredOutput(BASE_REQUEST),
+    (error: unknown) => {
+      assert.ok(error instanceof NvidiaNemotronLlmProviderError);
+      assert.equal(error.code, "LOCAL_CONCURRENCY_LIMIT");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  release?.();
+  await inFlight;
+  assert.equal(client.calls.length, 1);
+});

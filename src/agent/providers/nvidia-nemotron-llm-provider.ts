@@ -1,9 +1,9 @@
 // Adaptador NVIDIA Nemotron para o contrato LlmInterpreterProvider — chama a
 // API compatível com OpenAI Chat Completions exposta pela NVIDIA (NIM) e
 // devolve apenas o texto final. Não decide nada sobre a conversa: quem
-// valida a saída continua sendo o llm-output-validator.ts. Nesta etapa o
-// provider não é ligado ao runtime, ao simulador nem a nenhuma variável de
-// ambiente — é infraestrutura isolada, testável com um cliente fake.
+// valida a saída continua sendo o llm-output-validator.ts. O provider é
+// criado somente quando BF_LLM_MODE=NVIDIA_NEMOTRON e é testável com um
+// cliente fake, sem acesso a rede na suíte.
 import OpenAI, {
   APIConnectionTimeoutError,
   AuthenticationError,
@@ -22,7 +22,9 @@ export type NvidiaNemotronLlmProviderErrorCode =
   | "NVIDIA_TIMEOUT"
   | "NVIDIA_SERVER_ERROR"
   | "NVIDIA_EMPTY_OUTPUT"
-  | "NVIDIA_UNKNOWN";
+  | "NVIDIA_UNKNOWN"
+  | "LOCAL_RATE_LIMIT"
+  | "LOCAL_CONCURRENCY_LIMIT";
 
 export class NvidiaNemotronLlmProviderError extends Error {
   readonly code: NvidiaNemotronLlmProviderErrorCode;
@@ -89,8 +91,24 @@ export type CreateNvidiaNemotronLlmProviderInput = {
   apiKey: string;
   model?: string;
   baseURL?: string;
+  maxRequestsPerMinute?: number;
+  maxConcurrentRequests?: number;
   client?: NvidiaCompatibleClient;
 };
+
+const DEFAULT_MAX_REQUESTS_PER_MINUTE = 30;
+const MAX_REQUESTS_PER_MINUTE_CEILING = 600;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
+const MAX_CONCURRENT_REQUESTS_CEILING = 20;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function validateLimit(value: unknown, defaultValue: number, ceiling: number, name: string): number {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > ceiling) {
+    throw new TypeError(`createNvidiaNemotronLlmProvider: ${name} must be an integer between 1 and ${ceiling}`);
+  }
+  return value;
+}
 
 function normalizeApiKey(apiKey: unknown): string {
   if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
@@ -132,35 +150,52 @@ export function createNvidiaNemotronLlmProvider(
   const apiKey = normalizeApiKey(input.apiKey);
   const model = normalizeModel(input.model);
   const baseURL = normalizeBaseURL(input.baseURL);
+  const maxRequestsPerMinute = validateLimit(input.maxRequestsPerMinute, DEFAULT_MAX_REQUESTS_PER_MINUTE, MAX_REQUESTS_PER_MINUTE_CEILING, "maxRequestsPerMinute");
+  const maxConcurrentRequests = validateLimit(input.maxConcurrentRequests, DEFAULT_MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_REQUESTS_CEILING, "maxConcurrentRequests");
   const client: NvidiaCompatibleClient = input.client ?? (new OpenAI({ apiKey, baseURL }) as unknown as NvidiaCompatibleClient);
+  let requestTimestamps: number[] = [];
+  let activeRequestCount = 0;
 
   return {
     async generateStructuredOutput(request: LlmProviderRequest): Promise<unknown> {
       const { systemPrompt, userPrompt, schemaName } = request;
+      const startedAt = Date.now();
+      requestTimestamps = requestTimestamps.filter(timestamp => startedAt - timestamp < RATE_LIMIT_WINDOW_MS);
+      if (requestTimestamps.length >= maxRequestsPerMinute) {
+        throw new NvidiaNemotronLlmProviderError("LOCAL_RATE_LIMIT", true);
+      }
+      if (activeRequestCount >= maxConcurrentRequests) {
+        throw new NvidiaNemotronLlmProviderError("LOCAL_CONCURRENCY_LIMIT", true);
+      }
+      requestTimestamps.push(startedAt);
+      activeRequestCount += 1;
 
-      let response: NvidiaChatCompletionLike;
       try {
-        const requestBody: NvidiaChatCompletionRequest = {
-          model,
-          messages: [
-            { role: "system", content: buildSystemPrompt(systemPrompt, schemaName) },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0,
-          chat_template_kwargs: { enable_thinking: false },
-          guided_json: OPENAI_LLM_RESPONSE_SCHEMA,
-        };
-        response = await client.chat.completions.create(requestBody);
-      } catch (error) {
-        throw mapProviderError(error);
-      }
+        let response: NvidiaChatCompletionLike;
+        try {
+          const requestBody: NvidiaChatCompletionRequest = {
+            model,
+            messages: [
+              { role: "system", content: buildSystemPrompt(systemPrompt, schemaName) },
+              { role: "user", content: userPrompt },
+            ],
+            temperature: 0,
+            chat_template_kwargs: { enable_thinking: false },
+            guided_json: OPENAI_LLM_RESPONSE_SCHEMA,
+          };
+          response = await client.chat.completions.create(requestBody);
+        } catch (error) {
+          throw mapProviderError(error);
+        }
 
-      const content = response?.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || content.trim().length === 0) {
-        throw new NvidiaNemotronLlmProviderError("NVIDIA_EMPTY_OUTPUT", true);
+        const content = response?.choices?.[0]?.message?.content;
+        if (typeof content !== "string" || content.trim().length === 0) {
+          throw new NvidiaNemotronLlmProviderError("NVIDIA_EMPTY_OUTPUT", true);
+        }
+        return content;
+      } finally {
+        activeRequestCount -= 1;
       }
-
-      return content;
     },
   };
 }

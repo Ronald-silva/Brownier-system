@@ -514,15 +514,29 @@ test("81. NVIDIA_NEMOTRON não exige variáveis OpenAI", () => {
   assert.equal(result.mode, "NVIDIA_NEMOTRON");
 });
 
-test("82. NVIDIA_NEMOTRON ignora limites OpenAI inválidos", () => {
-  const result = readLlmRuntimeConfig(
-    validNvidiaEnv({
-      BF_LLM_MAX_REQUESTS_PER_MINUTE: "invalido",
-      BF_LLM_MAX_CONCURRENT_REQUESTS: "-10",
-    }),
+test("82. NVIDIA_NEMOTRON valida os mesmos limites locais do runtime", () => {
+  assertThrowsWithCode(
+    validNvidiaEnv({ BF_LLM_MAX_REQUESTS_PER_MINUTE: "invalido" }),
+    "INVALID_LLM_MAX_REQUESTS_PER_MINUTE",
   );
-  assert.equal(result.mode, "NVIDIA_NEMOTRON");
-  assert.deepEqual(Object.keys(result).sort(), ["mode", "nvidiaApiKey", "nvidiaBaseUrl", "nvidiaModel"]);
+  assertThrowsWithCode(
+    validNvidiaEnv({ BF_LLM_MAX_CONCURRENT_REQUESTS: "-10" }),
+    "INVALID_LLM_MAX_CONCURRENT_REQUESTS",
+  );
+});
+
+test("82a. NVIDIA_NEMOTRON lê os limites locais", () => {
+  const result = readLlmRuntimeConfig(
+    validNvidiaEnv({ BF_LLM_MAX_REQUESTS_PER_MINUTE: "12", BF_LLM_MAX_CONCURRENT_REQUESTS: "3" }),
+  );
+  assert.deepEqual(result, {
+    mode: "NVIDIA_NEMOTRON",
+    nvidiaApiKey: "nvapi-abc123",
+    nvidiaModel: "nvidia/nemotron-3-ultra-550b-a55b",
+    nvidiaBaseUrl: "https://integrate.api.nvidia.com/v1",
+    maxRequestsPerMinute: 12,
+    maxConcurrentRequests: 3,
+  });
 });
 
 test("83. OPENAI_FALLBACK ignora variáveis NVIDIA inválidas", () => {

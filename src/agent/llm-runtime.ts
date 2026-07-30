@@ -2,8 +2,8 @@
 // peças de infraestrutura que ela liga sob demanda: o provider OpenAI e o
 // LLM Interpreter já existentes. Não conhece Tools, Session Store,
 // Conversation Service nem Engine — devolve só { llmMode, llmInterpreter? }
-// para quem for injetar isso no Text Conversation Service (hoje, o
-// simulador). Em DISABLED, nenhum provider é criado.
+// para quem for injetar isso no Text Conversation Service (simulador e
+// WhatsApp). Em DISABLED, nenhum provider é criado.
 import { readLlmRuntimeConfig } from "./llm-runtime-config.ts";
 import { createOpenAiLlmProvider } from "./providers/openai-llm-provider.ts";
 import type { OpenAiResponsesClient } from "./providers/openai-llm-provider.ts";
@@ -51,6 +51,8 @@ export function resolveLlmRuntime(input: ResolveLlmRuntimeInput): LlmRuntime {
       apiKey: config.nvidiaApiKey,
       model: config.nvidiaModel,
       baseURL: config.nvidiaBaseUrl,
+      maxRequestsPerMinute: config.maxRequestsPerMinute,
+      maxConcurrentRequests: config.maxConcurrentRequests,
       client: input.nvidiaClient,
     });
     const llmInterpreter = createLlmInterpreter({ provider });

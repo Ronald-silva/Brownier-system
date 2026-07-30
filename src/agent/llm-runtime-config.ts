@@ -19,6 +19,8 @@ export type LlmRuntimeConfig =
       nvidiaApiKey: string;
       nvidiaModel: string;
       nvidiaBaseUrl: string;
+      maxRequestsPerMinute: number;
+      maxConcurrentRequests: number;
     };
 
 export type LlmRuntimeConfigErrorCode =
@@ -127,7 +129,21 @@ export function readLlmRuntimeConfig(env: Record<string, string | undefined>): L
     const nvidiaApiKey = readNvidiaApiKey(env.NVIDIA_API_KEY);
     const nvidiaModel = readNvidiaModel(env.NVIDIA_MODEL);
     const nvidiaBaseUrl = readNvidiaBaseUrl(env.NVIDIA_BASE_URL);
-    return { mode: "NVIDIA_NEMOTRON", nvidiaApiKey, nvidiaModel, nvidiaBaseUrl };
+    const maxRequestsPerMinute = readBoundedInteger(
+      env.BF_LLM_MAX_REQUESTS_PER_MINUTE,
+      DEFAULT_MAX_REQUESTS_PER_MINUTE,
+      MAX_REQUESTS_PER_MINUTE_CEILING,
+      "INVALID_LLM_MAX_REQUESTS_PER_MINUTE",
+      "BF_LLM_MAX_REQUESTS_PER_MINUTE",
+    );
+    const maxConcurrentRequests = readBoundedInteger(
+      env.BF_LLM_MAX_CONCURRENT_REQUESTS,
+      DEFAULT_MAX_CONCURRENT_REQUESTS,
+      MAX_CONCURRENT_REQUESTS_CEILING,
+      "INVALID_LLM_MAX_CONCURRENT_REQUESTS",
+      "BF_LLM_MAX_CONCURRENT_REQUESTS",
+    );
+    return { mode: "NVIDIA_NEMOTRON", nvidiaApiKey, nvidiaModel, nvidiaBaseUrl, maxRequestsPerMinute, maxConcurrentRequests };
   }
   if (mode !== "OPENAI_FALLBACK") {
     throw new LlmRuntimeConfigError("INVALID_LLM_MODE", "BF_LLM_MODE contém um valor não reconhecido");

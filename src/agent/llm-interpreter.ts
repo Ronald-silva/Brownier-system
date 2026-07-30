@@ -1,11 +1,8 @@
 // LLM Interpreter — componente isolado e testável que chamaria um provider
 // de IA para converter texto em AgentConversationAction[] quando o
-// Deterministic Interpreter não entender. Nesta etapa NÃO é chamado por
-// nenhum outro componente do sistema (nem Text Conversation Service, nem
-// simulador): é infraestrutura pronta para uma integração futura decidir
-// quando usá-la. Não chama Tools, não chama Orders, não cria pedido, não
-// faz rede — quem faz rede é o provider injetado, que aqui é sempre um
-// FakeLlmProvider nos testes.
+// Deterministic Interpreter não entender. É usado como fallback elegível
+// pelo Text Conversation Service; não chama Tools, não chama Orders, não
+// cria pedido e não faz rede — isso fica restrito ao provider injetado.
 import { buildLlmSystemPrompt, buildLlmUserPrompt, LLM_INTERPRETER_PROMPT_VERSION } from "./llm-prompt.ts";
 import { DEFAULT_MAX_OUTPUT_LENGTH, validateLlmOutput } from "./llm-output-validator.ts";
 import type {
