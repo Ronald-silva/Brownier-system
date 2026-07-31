@@ -146,9 +146,16 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   BUSINESS_ADDRESS: "O endereço para retirada é:\n\n{address}",
   BUSINESS_ADDRESS_UNAVAILABLE:
     "Ainda não tenho o endereço de retirada confirmado. Posso chamar um atendente para confirmar essa informação.",
-  BUSINESS_PICKUP_HOURS: "O horário informado para retirada é:\n\n{hours}",
+  // Horário de funcionamento/retirada — texto sempre montado a partir de um
+  // OperatingStatus já calculado por operating-status.ts (relógio real,
+  // America/Fortaleza), nunca de string livre nem de inferência do modelo.
+  BUSINESS_OPEN_NOW: "Sim, estamos abertos agora. Você pode retirar até às {closeTime}.",
+  BUSINESS_CLOSED_TODAY: "No momento estamos fechados. Abrimos hoje às {nextOpenTime}.",
+  BUSINESS_CLOSED_OTHER_DAY: "No momento estamos fechados. Nosso próximo horário de atendimento é {weekday}, às {nextOpenTime}.",
+  BUSINESS_CLOSED_NO_NEXT_OPEN:
+    "No momento estamos fechados e não encontrei o próximo horário de abertura. Posso chamar um atendente para confirmar.",
   BUSINESS_PICKUP_HOURS_UNAVAILABLE:
-    "Ainda não tenho a confirmação do horário de retirada agora. Posso chamar um atendente para confirmar para você.",
+    "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 };
 

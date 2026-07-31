@@ -8,7 +8,8 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool, getDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
-import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress } from "./src/lib/business-defaults.ts";
+import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress, ensureBrownierOperatingHours } from "./src/lib/business-defaults.ts";
+import { validateStructuredWeeklyHours } from "./src/lib/business-hours.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
 import { createPostgresConversationState } from "./src/agent/postgres-conversation-state.ts";
 import {
@@ -29,6 +30,16 @@ type Store = {
   orders: Order[];
 };
 
+// RISCO CONHECIDO (Railway): o Store continua sendo o mesmo arquivo JSON em
+// disco já usado por produtos/pedidos (src/lib/store.ts) — nenhum PostgreSQL
+// novo foi introduzido para dados comerciais nesta etapa, e o Postgres já
+// existente (getDatabasePool, abaixo) continua exclusivo do estado de
+// conversas do WhatsApp. Isso inclui agora `business.operatingHours`: sem um
+// volume persistente montado em `BF_STORE_PATH`/`data/`, um redeploy no
+// Railway apaga o filesystem efêmero do container e os horários cadastrados
+// pelo painel (assim como produtos e pedidos) somem, voltando ao horário
+// inicial via backfill no próximo boot. Antes de qualquer deploy real, o
+// Railway precisa de um volume persistente apontando para esse caminho.
 const storePath = resolveStorePath();
 const orderStatuses = ORDER_STATUSES;
 const limitedRequests = new Map<string, { count: number; started: number }>();
@@ -113,8 +124,9 @@ const demoStore: Store = {
 async function loadStore(): Promise<Store> {
   const store = await loadStoreFile(storePath, () => demoStore);
   const withOfficialAddress = ensureBrownierPickupAddress(store);
-  if (withOfficialAddress !== store) await saveStore(withOfficialAddress);
-  return withOfficialAddress;
+  const withOperatingHours = ensureBrownierOperatingHours(withOfficialAddress);
+  if (withOperatingHours !== store) await saveStore(withOperatingHours);
+  return withOperatingHours;
 }
 async function saveStore(store: Store) { return saveStoreFile(storePath, store); }
 function publicProduct(product: Product) {
@@ -223,7 +235,12 @@ async function startServer() {
   });
   app.get("/api/admin/bootstrap", admin, async (_req, res) => res.json(await loadStore()));
   app.put("/api/admin/business", admin, async (req, res) => {
-    const store = await loadStore(); store.business = { ...store.business, ...req.body, name: "Brownieria Fortal" }; await saveStore(store); res.json(store.business);
+    const body = req.body ?? {};
+    if (body.operatingHours !== undefined) {
+      const errors = validateStructuredWeeklyHours(body.operatingHours);
+      if (errors.length > 0) return res.status(400).json({ error: "Horário de funcionamento inválido.", details: errors });
+    }
+    const store = await loadStore(); store.business = { ...store.business, ...body, name: "Brownieria Fortal" }; await saveStore(store); res.json(store.business);
   });
   app.post("/api/admin/products", admin, adminProductBody, async (req, res) => {
     const store = await loadStore(); const body = req.body ?? {};

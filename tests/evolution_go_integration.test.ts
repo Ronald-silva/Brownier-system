@@ -391,9 +391,47 @@ test("aceitação webhook: cada pergunta factual recebe uma única resposta real
   assert.equal(sent.length, 4);
   assert.equal(sent[0]?.text, "Boa noite! Seja bem-vindo à Brownieria Fortal 😊 Como posso ajudar?");
   assert.match(sent[1]?.text ?? "", new RegExp(BROWNIER_PICKUP_ADDRESS.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.equal(sent[2]?.text, "Ainda não tenho a confirmação do horário de retirada agora. Posso chamar um atendente para confirmar para você.");
+  assert.equal(sent[2]?.text, "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar.");
   assert.match(sent[3]?.text ?? "", /Brownie/);
   assert.deepEqual(sent.map(entry => entry.contactId), [contactId, contactId, contactId, contactId]);
+});
+
+test("aceitação webhook: horário de funcionamento é respondido pelo cálculo determinístico, nunca pelo NVIDIA", async () => {
+  const store = acceptanceStore();
+  store.business.operatingHours = {
+    MON: [{ open: "08:00", close: "18:00" }], TUE: [{ open: "08:00", close: "18:00" }], WED: [{ open: "08:00", close: "18:00" }],
+    THU: [{ open: "08:00", close: "18:00" }], FRI: [{ open: "08:00", close: "18:00" }], SAT: [{ open: "08:00", close: "12:00" }], SUN: [],
+  };
+  const sent: Array<{ contactId: string; text: string }> = [];
+  // FakeNvidiaClient sem nenhuma saída: qualquer chamada real ao provider
+  // lança e o teste falha — a única forma de passar é o webhook nunca chamar.
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store, saveDomainStore: async () => {}, env: NIM_ENV,
+    nvidiaClient: new FakeNvidiaClient([]),
+    now: () => new Date("2026-08-03T10:00:00-03:00"), // segunda-feira, dentro do horário
+  });
+  const handler = createEvolutionGoWebhookHandler({ config, webhookToken: "webhook-secret", conversation: runtime, sender: { async sendText(message) { sent.push(message); } } });
+  await deliver(handler, incoming({ data: { Info: { ID: "hours-open", Sender: "5585111111111@s.whatsapp.net", Chat: "5585111111111@s.whatsapp.net", IsFromMe: false, IsGroup: false, Type: "text" }, Message: { conversation: "Vocês estão abertos agora?" } } }));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.text, "Sim, estamos abertos agora. Você pode retirar até às 18h.");
+});
+
+test("aceitação webhook: à 1h da madrugada informa fechado e a próxima abertura, sem chamar o NVIDIA", async () => {
+  const store = acceptanceStore();
+  store.business.operatingHours = {
+    MON: [{ open: "08:00", close: "18:00" }], TUE: [{ open: "08:00", close: "18:00" }], WED: [{ open: "08:00", close: "18:00" }],
+    THU: [{ open: "08:00", close: "18:00" }], FRI: [{ open: "08:00", close: "18:00" }], SAT: [{ open: "08:00", close: "12:00" }], SUN: [],
+  };
+  const sent: Array<{ contactId: string; text: string }> = [];
+  const runtime = createWhatsappConversationRuntime({
+    loadDomainStore: async () => store, saveDomainStore: async () => {}, env: NIM_ENV,
+    nvidiaClient: new FakeNvidiaClient([]),
+    now: () => new Date("2026-08-04T01:00:00-03:00"), // terça-feira, 1h da madrugada
+  });
+  const handler = createEvolutionGoWebhookHandler({ config, webhookToken: "webhook-secret", conversation: runtime, sender: { async sendText(message) { sent.push(message); } } });
+  await deliver(handler, incoming({ data: { Info: { ID: "hours-madrugada", Sender: "5585111111112@s.whatsapp.net", Chat: "5585111111112@s.whatsapp.net", IsFromMe: false, IsGroup: false, Type: "text" }, Message: { conversation: "Posso retirar pedido agora?" } } }));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.text, "No momento estamos fechados. Abrimos hoje às 8h.");
 });
 
 test("aceitação webhook: mensagens rápidas preservam ordem e um replay após restart não reenvia", async () => {
@@ -419,7 +457,7 @@ test("aceitação webhook: mensagens rápidas preservam ordem e um replay após 
   ]);
   assert.equal(sent.length, 2);
   assert.match(sent[0]?.text ?? "", /Rua Professor Leite Gondim/);
-  assert.match(sent[1]?.text ?? "", /horário de retirada agora/i);
+  assert.match(sent[1]?.text ?? "", /horário de retirada/i);
 
   const restartedHandler = createHandler();
   await deliver(restartedHandler, payload("rapid-address", "Qual o endereço?"));

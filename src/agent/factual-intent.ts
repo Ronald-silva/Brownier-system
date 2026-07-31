@@ -1,25 +1,38 @@
 import { normalizeInterpreterText } from "./deterministic-interpreter.ts";
+import type { OperatingStatus } from "./operating-status.ts";
 
 export type FactualIntent =
   | { kind: "ADDRESS"; address?: string }
-  | { kind: "PICKUP_AVAILABILITY"; hours?: string }
+  | { kind: "PICKUP_AVAILABILITY"; status: OperatingStatus }
   | { kind: "MENU" };
 
 function tokens(text: string): Set<string> {
   return new Set(normalizeInterpreterText(text).split(" ").filter(Boolean));
 }
 
+// Palavras que por si só perguntam sobre o estado aberto/fechado, mesmo sem
+// menção a "retirada"/"agora" (ex.: "vocês estão abertos?", "que horas
+// abre?"). Combinadas com pickupContext+asksNow, cobrem as quatro perguntas
+// pedidas: "está aberto?", "posso retirar agora?", "que horas abre?",
+// "posso buscar hoje?".
+const OPEN_STATE_WORDS = new Set([
+  "aberto", "aberta", "abertos", "abertas", "abre", "abrem", "abriu",
+  "funciona", "funcionam", "funcionando",
+  "fechado", "fechada", "fechados", "fechadas",
+]);
+
 // Intenções factuais são conceitos do domínio, não uma lista de frases. Elas
 // têm prioridade porque a resposta vem do Store e não exige inferência nem
-// pode ser inventada pelo provider.
+// pode ser inventada pelo provider — inclui o cálculo determinístico de
+// horário (operating-status.ts), nunca o texto cru interpretado pelo modelo.
 export function resolveFactualIntent(input: {
   text: string;
   address?: string;
-  hours?: string;
+  operatingStatus?: OperatingStatus;
 }): FactualIntent | undefined {
   const words = tokens(input.text);
   const asksLocation = words.has("endereco") || words.has("localizacao") || words.has("onde") || words.has("local");
-  const pickupContext = words.has("retirada") || words.has("retirar") || words.has("coleta") || words.has("coletar") || words.has("loja") || words.has("fica") || words.has("ficam");
+  const pickupContext = words.has("retirada") || words.has("retirar") || words.has("coleta") || words.has("coletar") || words.has("buscar") || words.has("loja") || words.has("fica") || words.has("ficam");
   // No canal da loja, uma pergunta explícita pelo endereço já se refere ao
   // endereço comercial; os demais termos desambiguam "onde/local".
   if (words.has("endereco") || words.has("localizacao") || (asksLocation && pickupContext)) {
@@ -28,9 +41,9 @@ export function resolveFactualIntent(input: {
   }
 
   const asksNow = words.has("agora") || words.has("hoje") || words.has("horario");
-  if (pickupContext && asksNow) {
-    const hours = input.hours?.trim();
-    return hours ? { kind: "PICKUP_AVAILABILITY", hours } : { kind: "PICKUP_AVAILABILITY" };
+  const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
+  if ((pickupContext && asksNow) || asksOpenState) {
+    return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };
   }
 
   if (words.has("menu") || words.has("cardapio") || words.has("sabores") || words.has("preco") || words.has("precos")) {

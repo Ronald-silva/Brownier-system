@@ -1,6 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ORDER_STATUSES } from "./lib/orderStatuses";
 import { formatCurrency } from "./lib/format";
+import {
+  WEEKDAYS,
+  WEEKDAY_LABELS_PT_BR,
+  INITIAL_OPERATING_HOURS,
+  validateStructuredWeeklyHours,
+  type Weekday,
+  type TimeRange,
+  type StructuredWeeklyHours,
+} from "./lib/business-hours";
 
 type Product = { id: string; slug: string; name: string; description: string; category: string; ingredients: string; allergens: string; basePrice: number; promotionalPrice: number | null; minimumPromotionalQuantity: number | null; isAvailable: boolean; isFeatured: boolean; isDay?: boolean; imageUrl: string; displayOrder: number };
 type Order = { id: string; publicCode: string; status: string; customerName: string; customerPhone: string; fulfillmentType: string; paymentMethod: string; total: number; createdAt: string; items: { productName: string; quantity: number }[]; customerNotes?: string };
@@ -175,5 +184,112 @@ function Settings({ business, headers, onSaved }: { business: Record<string, unk
       </fieldset>
       <button className="primary" disabled={savingSlots}>{savingSlots ? "Salvando…" : "Salvar horários"}</button>
     </form>
+    <OperatingHoursEditor operatingHours={business.operatingHours} headers={headers} onSaved={onSaved} />
   </section> }
+function cloneWeeklyHours(hours: StructuredWeeklyHours): StructuredWeeklyHours {
+  return Object.fromEntries(WEEKDAYS.map(day => [day, hours[day].map(range => ({ ...range }))])) as StructuredWeeklyHours;
+}
+function isStructuredWeeklyHoursShape(value: unknown): value is StructuredWeeklyHours {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return WEEKDAYS.every(day => Array.isArray(record[day]));
+}
+function OperatingHoursEditor({ operatingHours, headers, onSaved }: { operatingHours: unknown; headers: Record<string, string>; onSaved: (message?: string) => void }) {
+  const [hours, setHours] = useState<StructuredWeeklyHours>(() =>
+    cloneWeeklyHours(isStructuredWeeklyHoursShape(operatingHours) ? operatingHours : INITIAL_OPERATING_HOURS),
+  );
+  const [copySource, setCopySource] = useState<Weekday>("MON");
+  const [copyTargets, setCopyTargets] = useState<Record<Weekday, boolean>>(
+    () => Object.fromEntries(WEEKDAYS.map(day => [day, false])) as Record<Weekday, boolean>,
+  );
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const setDayRanges = (day: Weekday, ranges: TimeRange[]) => setHours(prev => ({ ...prev, [day]: ranges }));
+  const toggleDayOpen = (day: Weekday) => {
+    const isOpen = hours[day].length > 0;
+    setDayRanges(day, isOpen ? [] : [{ open: "08:00", close: "18:00" }]);
+  };
+  const addRange = (day: Weekday) => setDayRanges(day, [...hours[day], { open: "08:00", close: "18:00" }]);
+  const removeRange = (day: Weekday, index: number) => setDayRanges(day, hours[day].filter((_, i) => i !== index));
+  const updateRange = (day: Weekday, index: number, patch: Partial<TimeRange>) =>
+    setDayRanges(day, hours[day].map((range, i) => (i === index ? { ...range, ...patch } : range)));
+  const copyToTargets = () => {
+    const targets = WEEKDAYS.filter(day => copyTargets[day] && day !== copySource);
+    if (targets.length === 0) return;
+    const source = hours[copySource].map(range => ({ ...range }));
+    setHours(prev => {
+      const next = { ...prev };
+      for (const day of targets) next[day] = source.map(range => ({ ...range }));
+      return next;
+    });
+    setCopyTargets(Object.fromEntries(WEEKDAYS.map(day => [day, false])) as Record<Weekday, boolean>);
+  };
+  const save = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const validationErrors = validateStructuredWeeklyHours(hours);
+    if (validationErrors.length > 0) {
+      setErrors(validationErrors.map(err => `${WEEKDAY_LABELS_PT_BR[err.weekday]}: ${err.message}`));
+      return;
+    }
+    setErrors([]);
+    setSaving(true);
+    try {
+      const r = await fetch("/api/admin/business", { method: "PUT", headers, body: JSON.stringify({ operatingHours: hours }) });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        const details = Array.isArray(data.details) ? data.details as { weekday: Weekday; message: string }[] : [];
+        setErrors(details.length > 0 ? details.map(d => `${WEEKDAY_LABELS_PT_BR[d.weekday]}: ${d.message}`) : [data.error || "Não foi possível salvar os horários."]);
+        return;
+      }
+      onSaved("Horários de funcionamento atualizados.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="checkout-form" onSubmit={save}>
+      <fieldset>
+        <legend>Horários de funcionamento e retirada</legend>
+        <p className="subtle">Timezone: America/Fortaleza. Intervalos que passam da meia-noite são aceitos (ex.: abre 18:00, fecha 00:30).</p>
+        <div className="admin-list">
+          {WEEKDAYS.map(day => {
+            const ranges = hours[day];
+            const open = ranges.length > 0;
+            return (
+              <article className="order-card" key={day}>
+                <div className="choice-row">
+                  <h3>{WEEKDAY_LABELS_PT_BR[day]}</h3>
+                  <span className={open ? "avail-label" : "avail-label off"}>{open ? "Aberto" : "Fechado"}</span>
+                  <button type="button" className={open ? "switch on" : "switch"} aria-label={`Marcar ${WEEKDAY_LABELS_PT_BR[day]} como ${open ? "fechado" : "aberto"}`} onClick={() => toggleDayOpen(day)}><i /></button>
+                </div>
+                {open && ranges.map((range, index) => (
+                  <div className="choice-row" key={index}>
+                    <label>Abre<input aria-label={`Abertura de ${WEEKDAY_LABELS_PT_BR[day]}, intervalo ${index + 1}`} type="time" value={range.open} onChange={e => updateRange(day, index, { open: e.target.value })} /></label>
+                    <label>Fecha<input aria-label={`Encerramento de ${WEEKDAY_LABELS_PT_BR[day]}, intervalo ${index + 1}`} type="time" value={range.close} onChange={e => updateRange(day, index, { close: e.target.value })} /></label>
+                    <button type="button" className="text-button" aria-label={`Remover intervalo ${index + 1} de ${WEEKDAY_LABELS_PT_BR[day]}`} onClick={() => removeRange(day, index)}>Remover</button>
+                  </div>
+                ))}
+                {open && <button type="button" className="secondary" onClick={() => addRange(day)}>+ Adicionar intervalo</button>}
+              </article>
+            );
+          })}
+        </div>
+        <p className="subtle">Copiar horário de um dia para outros dias:</p>
+        <div className="choice-row">
+          <label>Copiar de<select aria-label="Copiar horário de" value={copySource} onChange={e => setCopySource(e.target.value as Weekday)}>{WEEKDAYS.map(day => <option value={day} key={day}>{WEEKDAY_LABELS_PT_BR[day]}</option>)}</select></label>
+        </div>
+        <div className="choice-row">
+          {WEEKDAYS.map(day => (
+            <label key={day}><input type="checkbox" checked={copyTargets[day]} disabled={day === copySource} onChange={e => setCopyTargets({ ...copyTargets, [day]: e.target.checked })} /> {WEEKDAY_LABELS_PT_BR[day]}</label>
+          ))}
+        </div>
+        <button type="button" className="secondary" onClick={copyToTargets}>Copiar para os dias marcados</button>
+        {errors.length > 0 && <div className="error">{errors.map((message, i) => <p key={i}>{message}</p>)}</div>}
+      </fieldset>
+      <button className="primary" disabled={saving}>{saving ? "Salvando…" : "Salvar horários de funcionamento"}</button>
+    </form>
+  );
+}
 function OrderList({ orders, search, setSearch, onStatus }: { orders: Order[]; search: string; setSearch: (v:string)=>void; onStatus: (o: Order, s: string) => void }) { const found = useMemo(() => orders.filter(o => `${o.publicCode} ${o.customerName} ${o.customerPhone}`.toLowerCase().includes(search.toLowerCase())), [orders,search]); return <section className="admin-content"><p className="eyebrow">PEDIDOS</p><h1>Organize sem procurar.</h1><input className="order-search" aria-label="Buscar pedidos" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar por código, nome ou telefone" /><h2 className="sr-only">Lista de pedidos</h2><div className="admin-list">{found.length === 0 ? <div className="empty"><h2>Nenhum pedido encontrado.</h2><p>Tente buscar por outro código, nome ou telefone.</p></div> : found.map(o => <article className="order-card order-card-status" key={o.id}><div><span className="status">{o.status.replaceAll("_"," ")}</span><h3>{o.publicCode} · {o.customerName}</h3><p>{o.customerPhone} · {o.items.map(i=>`${i.quantity}× ${i.productName}`).join(", ")}</p><strong>{formatCurrency(o.total)}</strong></div><select aria-label={`Status do pedido ${o.publicCode}`} value={o.status} onChange={e => onStatus(o,e.target.value)}>{statuses.map(s => <option key={s}>{s}</option>)}</select></article>)}</div></section> }

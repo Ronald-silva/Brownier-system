@@ -226,8 +226,17 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_ADDRESS_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_ADDRESS_UNAVAILABLE;
       break;
-    case "BUSINESS_PICKUP_HOURS":
-      text = interpolate(MESSAGE_CATALOG.BUSINESS_PICKUP_HOURS, { hours: data?.hours });
+    case "BUSINESS_OPEN_NOW":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_OPEN_NOW, { closeTime: data?.closeTime });
+      break;
+    case "BUSINESS_CLOSED_TODAY":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_CLOSED_TODAY, { nextOpenTime: data?.nextOpenTime });
+      break;
+    case "BUSINESS_CLOSED_OTHER_DAY":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_CLOSED_OTHER_DAY, { weekday: data?.weekday, nextOpenTime: data?.nextOpenTime });
+      break;
+    case "BUSINESS_CLOSED_NO_NEXT_OPEN":
+      text = MESSAGE_CATALOG.BUSINESS_CLOSED_NO_NEXT_OPEN;
       break;
     case "BUSINESS_PICKUP_HOURS_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_PICKUP_HOURS_UNAVAILABLE;

@@ -1,3 +1,5 @@
+import { INITIAL_OPERATING_HOURS, isStructuredWeeklyHours } from "./business-hours.ts";
+
 export const BROWNIER_PICKUP_ADDRESS = "Rua Professor Leite Gondim, 896, Antônio Bezerra, Fortaleza – CE, CEP 60360-332";
 
 type StoreWithBusiness = { business: Record<string, unknown> };
@@ -12,6 +14,22 @@ export function ensureBrownierPickupAddress<T extends StoreWithBusiness>(store: 
     business: {
       ...store.business,
       address: BROWNIER_PICKUP_ADDRESS,
+    },
+  };
+}
+
+// Backfill idempotente do horário estruturado: só preenche quando
+// `business.operatingHours` está ausente ou já não é um horário estruturado
+// válido — instalações que já têm horário cadastrado pelo painel nunca são
+// sobrescritas. Mesmo padrão de `ensureBrownierPickupAddress`: função pura,
+// devolve a MESMA referência quando nada muda.
+export function ensureBrownierOperatingHours<T extends StoreWithBusiness>(store: T): T {
+  if (isStructuredWeeklyHours(store.business.operatingHours)) return store;
+  return {
+    ...store,
+    business: {
+      ...store.business,
+      operatingHours: INITIAL_OPERATING_HOURS,
     },
   };
 }

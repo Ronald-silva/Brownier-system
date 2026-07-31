@@ -22,6 +22,10 @@ export function createWhatsappConversationRuntime(input: {
   // Injeção exclusiva de testes: evita qualquer chamada de rede na suíte.
   nvidiaClient?: NvidiaCompatibleClient;
   persistentState?: PostgresConversationState;
+  // Relógio injetável — sempre um Date real em produção (padrão: new Date()),
+  // só sobrescrito em teste para tornar getOperatingStatus() determinístico
+  // ponta a ponta (webhook → resposta), sem depender do horário real da máquina.
+  now?: () => Date;
 }): WhatsappConversationRuntime {
   const sessionStore = new InMemoryAgentSessionStore();
   const llmRuntime = resolveLlmRuntime({
@@ -76,7 +80,7 @@ export function createWhatsappConversationRuntime(input: {
         }
         const store = await input.loadDomainStore();
         const orderCountBefore = store.orders.length;
-        const tools = createAgentTools({ store });
+        const tools = createAgentTools({ store, now: input.now });
         const conversationService = createAgentConversationService({ sessionStore, tools });
         // O interpretador determinístico continua sendo a primeira camada. O
         // NIM só entra no fallback para linguagem natural elegível; toda saída

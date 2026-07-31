@@ -6,6 +6,7 @@ import {
   type AgentDomainStore,
 } from "../src/agent/tools.ts";
 import { createOrder as officialCreateOrder, type CreateOrderInput, type CreateOrderResult } from "../src/lib/orders.ts";
+import { INITIAL_OPERATING_HOURS } from "../src/lib/business-hours.ts";
 
 function product(overrides: Partial<AgentDomainStore["products"][number]> = {}) {
   return {
@@ -230,4 +231,22 @@ test("[integração] tools.createOrder e orders.ts oficial calculam o mesmo tota
   assert.equal(fromTools.order.subtotal, fromOfficial.order.subtotal);
   assert.equal(fromTools.order.discount, fromOfficial.order.discount);
   assert.equal(fromTools.order.total, fromOfficial.order.total);
+});
+
+// --- getOperatingStatus ---
+
+test("getOperatingStatus delega para operating-status.ts usando o relógio injetado e o horário cadastrado", () => {
+  const store = makeStore({ business: { ...makeStore().business, operatingHours: INITIAL_OPERATING_HOURS } });
+  const tools = createAgentTools({ store, now: () => new Date("2026-08-03T10:00:00-03:00") }); // segunda, 10h
+  const status = tools.getOperatingStatus!();
+  assert.equal(status.known, true);
+  if (status.known) { assert.equal(status.isOpenNow, true); assert.equal(status.currentClose, "18:00"); }
+});
+
+test("getOperatingStatus nunca lança quando operatingHours está ausente ou malformado — vira known:false", () => {
+  const missing = createAgentTools({ store: makeStore() });
+  assert.deepEqual(missing.getOperatingStatus!(), { known: false });
+
+  const malformed = createAgentTools({ store: makeStore({ business: { ...makeStore().business, operatingHours: "seg a sex" } }) });
+  assert.deepEqual(malformed.getOperatingStatus!(), { known: false });
 });

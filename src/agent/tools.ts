@@ -13,6 +13,8 @@ import {
   type BusinessForOrderCreation,
   type StoreLike,
 } from "../lib/orders.ts";
+import { isStructuredWeeklyHours } from "../lib/business-hours.ts";
+import { getOperatingStatus, type OperatingStatus } from "./operating-status.ts";
 
 export class AgentToolError extends Error {
   code: string;
@@ -91,6 +93,9 @@ export type AgentTools = {
   // não ser enviada ao LLM por padrão.
   getBusinessAddress?(): string;
   getBusinessHours?(): string;
+  // Fato determinístico de "está aberto agora" — calculado no servidor a
+  // partir do relógio real, nunca pelo modelo. Ver operating-status.ts.
+  getOperatingStatus?(): OperatingStatus;
   getPickupSlots(): string[];
   validatePickupTime(time: string): boolean;
   createOrder(input: { payload: CreateOrderPayload; idempotencyKey?: string }): CreateOrderResult;
@@ -123,6 +128,7 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
   const { store } = deps;
   const createOrderFn = deps.createOrderFn ?? officialCreateOrder;
   const isPickupTimeAllowedFn = deps.isPickupTimeAllowedFn ?? officialIsPickupTimeAllowed;
+  const now = deps.now ?? (() => new Date());
 
   return {
     listProducts() {
@@ -156,6 +162,11 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
 
     getBusinessHours() {
       return typeof store.business.hours === "string" ? store.business.hours.trim() : "";
+    },
+
+    getOperatingStatus() {
+      const structured = store.business.operatingHours;
+      return getOperatingStatus({ now: now(), hours: isStructuredWeeklyHours(structured) ? structured : undefined });
     },
 
     getPickupSlots() {

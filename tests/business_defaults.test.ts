@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress } from "../src/lib/business-defaults.ts";
+import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress, ensureBrownierOperatingHours } from "../src/lib/business-defaults.ts";
+import { INITIAL_OPERATING_HOURS } from "../src/lib/business-hours.ts";
 
 test("a semente comercial usa o endereço oficial de retirada", () => {
   assert.equal(BROWNIER_PICKUP_ADDRESS, "Rua Professor Leite Gondim, 896, Antônio Bezerra, Fortaleza – CE, CEP 60360-332");
@@ -23,4 +24,28 @@ test("backfill persiste o endereço oficial sem alterar os demais dados comercia
 test("backfill é idempotente quando o endereço já está correto", () => {
   const store = { business: { address: BROWNIER_PICKUP_ADDRESS }, products: [], orders: [] };
   assert.equal(ensureBrownierPickupAddress(store), store);
+});
+
+test("backfill de horário: preenche o horário inicial quando não há operatingHours cadastrado", () => {
+  const store: { business: Record<string, unknown>; products: unknown[]; orders: unknown[] } = {
+    business: { name: "Brownieria Fortal", hours: "" }, products: [], orders: [],
+  };
+  const result = ensureBrownierOperatingHours(store);
+  assert.deepEqual(result.business.operatingHours, INITIAL_OPERATING_HOURS);
+  assert.equal(result.business.name, "Brownieria Fortal");
+  // Store original não é mutado.
+  assert.equal(store.business.operatingHours, undefined);
+});
+
+test("backfill de horário é idempotente: nunca sobrescreve um horário já cadastrado pelo painel", () => {
+  const customHours = { ...INITIAL_OPERATING_HOURS, SUN: [{ open: "10:00", close: "14:00" }] };
+  const store = { business: { operatingHours: customHours }, products: [], orders: [] };
+  assert.equal(ensureBrownierOperatingHours(store), store);
+  assert.deepEqual(store.business.operatingHours, customHours);
+});
+
+test("backfill de horário trata operatingHours malformado como ausente e recadastra o inicial", () => {
+  const store = { business: { operatingHours: { MON: "não é uma lista" } }, products: [], orders: [] };
+  const result = ensureBrownierOperatingHours(store);
+  assert.deepEqual(result.business.operatingHours, INITIAL_OPERATING_HOURS);
 });

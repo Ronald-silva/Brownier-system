@@ -44,6 +44,8 @@ import type {
 } from "./llm-interpreter.types.ts";
 import { executeConversationActionBatch, isFailureResult } from "./conversation-action-batch.ts";
 import { resolveFactualIntent } from "./factual-intent.ts";
+import type { OperatingStatus } from "./operating-status.ts";
+import { WEEKDAY_LABELS_PT_BR, formatTimeBR } from "../lib/business-hours.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -374,6 +376,31 @@ function applySingleAction(params: {
   return { engineResult, sessionAfter, counterReset };
 }
 
+// Traduz o OperatingStatus já calculado (relógio real, America/Fortaleza) no
+// messageKey/dados certos — nunca o inverso: o texto nunca decide o estado,
+// só o exibe. Cobre os quatro casos pedidos (aberto, fechado hoje, fechado
+// em outro dia, sem cadastro) mais o caso residual sem próxima abertura
+// nenhuma (todos os dias fechados), que nunca deve travar/lançar.
+function pickupAvailabilityPolicyResult(status: OperatingStatus): TextConversationPolicyResult {
+  if (!status.known) {
+    return { event: "BUSINESS_PICKUP_HOURS_UNAVAILABLE", messageKey: "BUSINESS_PICKUP_HOURS_UNAVAILABLE" };
+  }
+  if (status.isOpenNow) {
+    return { event: "BUSINESS_OPEN_NOW", messageKey: "BUSINESS_OPEN_NOW", data: { closeTime: formatTimeBR(status.currentClose!) } };
+  }
+  if (!status.nextOpen) {
+    return { event: "BUSINESS_CLOSED_NO_NEXT_OPEN", messageKey: "BUSINESS_CLOSED_NO_NEXT_OPEN" };
+  }
+  if (status.nextOpen.sameDay) {
+    return { event: "BUSINESS_CLOSED_TODAY", messageKey: "BUSINESS_CLOSED_TODAY", data: { nextOpenTime: formatTimeBR(status.nextOpen.time) } };
+  }
+  return {
+    event: "BUSINESS_CLOSED_OTHER_DAY",
+    messageKey: "BUSINESS_CLOSED_OTHER_DAY",
+    data: { weekday: WEEKDAY_LABELS_PT_BR[status.nextOpen.weekday], nextOpenTime: formatTimeBR(status.nextOpen.time) },
+  };
+}
+
 function llmRecoveryKind(session: AgentSession): "START" | "ORDER" {
   return session.step === "START" || session.step === "BROWSING_MENU" ? "START" : "ORDER";
 }
@@ -462,7 +489,7 @@ export function createTextConversationService(
 
       // Informações factuais têm precedência sobre o interpretador e o LLM:
       // vêm do Store real e nunca dependem de inferência do modelo.
-      const factualIntent = resolveFactualIntent({ text, address: tools.getBusinessAddress?.(), hours: tools.getBusinessHours?.() });
+      const factualIntent = resolveFactualIntent({ text, address: tools.getBusinessAddress?.(), operatingStatus: tools.getOperatingStatus?.() });
       if (factualIntent?.kind === "MENU") {
         const { engineResult, sessionAfter, counterReset } = applySingleAction({
           conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: { type: "SHOW_MENU" },
@@ -483,9 +510,7 @@ export function createTextConversationService(
           ? factualIntent.address
             ? { event: "BUSINESS_ADDRESS", messageKey: "BUSINESS_ADDRESS", data: { address: factualIntent.address } }
             : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" }
-          : factualIntent.hours
-            ? { event: "BUSINESS_PICKUP_HOURS", messageKey: "BUSINESS_PICKUP_HOURS", data: { hours: factualIntent.hours } }
-            : { event: "BUSINESS_PICKUP_HOURS_UNAVAILABLE", messageKey: "BUSINESS_PICKUP_HOURS_UNAVAILABLE" };
+          : pickupAvailabilityPolicyResult(factualIntent.status);
         return {
           sessionKey,
           duplicateMessage: false,
