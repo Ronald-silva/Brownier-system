@@ -9,13 +9,24 @@ import { createOpenAiLlmProvider } from "./providers/openai-llm-provider.ts";
 import type { OpenAiResponsesClient } from "./providers/openai-llm-provider.ts";
 import { createNvidiaNemotronLlmProvider } from "./providers/nvidia-nemotron-llm-provider.ts";
 import type { NvidiaCompatibleClient } from "./providers/nvidia-nemotron-llm-provider.ts";
+import { createNvidiaNemotronVerbalizerProvider } from "./providers/nvidia-nemotron-verbalizer-provider.ts";
 import { createLlmInterpreter } from "./llm-interpreter.ts";
 import type { LlmInterpreter } from "./llm-interpreter.types.ts";
+import { createLlmVerbalizer } from "./llm-verbalizer.ts";
+import type { LlmVerbalizer } from "./llm-verbalizer.ts";
 
 export type LlmRuntime =
   | { llmMode: "DISABLED" }
   | { llmMode: "FALLBACK"; llmInterpreter: LlmInterpreter }
-  | { llmMode: "NVIDIA_NEMOTRON"; llmInterpreter: LlmInterpreter };
+  | {
+      llmMode: "NVIDIA_NEMOTRON";
+      llmInterpreter: LlmInterpreter;
+      // BF_VERBALIZATION_MODE=DISABLED|ENABLED (padrão DISABLED). Só ligado
+      // quando o provider é NVIDIA_NEMOTRON — nenhum outro provider ganha
+      // verbalização nesta etapa.
+      verbalizationMode: "DISABLED" | "ENABLED";
+      llmVerbalizer?: LlmVerbalizer;
+    };
 
 export type ResolveLlmRuntimeInput = {
   env: Record<string, string | undefined>;
@@ -24,6 +35,10 @@ export type ResolveLlmRuntimeInput = {
   // real). Nunca exposto de volta no retorno.
   openAiClient?: OpenAiResponsesClient;
   nvidiaClient?: NvidiaCompatibleClient;
+  // Cliente da chamada de verbalização (NVIDIA #2) — separado do cliente do
+  // planejamento (chamada #1) só para permitir testes que precisam
+  // distingui-los; em produção normalmente é o mesmo cliente NVIDIA.
+  nvidiaVerbalizerClient?: NvidiaCompatibleClient;
 };
 
 export function resolveLlmRuntime(input: ResolveLlmRuntimeInput): LlmRuntime {
@@ -57,7 +72,21 @@ export function resolveLlmRuntime(input: ResolveLlmRuntimeInput): LlmRuntime {
     });
     const llmInterpreter = createLlmInterpreter({ provider });
 
-    return { llmMode: "NVIDIA_NEMOTRON", llmInterpreter };
+    if (config.verbalizationMode === "DISABLED") {
+      return { llmMode: "NVIDIA_NEMOTRON", llmInterpreter, verbalizationMode: "DISABLED" };
+    }
+
+    const verbalizerProvider = createNvidiaNemotronVerbalizerProvider({
+      apiKey: config.nvidiaApiKey,
+      model: config.nvidiaModel,
+      baseURL: config.nvidiaBaseUrl,
+      maxRequestsPerMinute: config.maxRequestsPerMinute,
+      maxConcurrentRequests: config.maxConcurrentRequests,
+      client: input.nvidiaVerbalizerClient ?? input.nvidiaClient,
+    });
+    const llmVerbalizer = createLlmVerbalizer({ provider: verbalizerProvider });
+
+    return { llmMode: "NVIDIA_NEMOTRON", llmInterpreter, verbalizationMode: "ENABLED", llmVerbalizer };
   }
 
   throw new Error("resolveLlmRuntime: modo de LLM não tratado");

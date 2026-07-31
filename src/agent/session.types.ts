@@ -1,6 +1,18 @@
 // Tipos do estado de sessão do agente de conversa. Nenhuma lógica de
 // transição de etapas é implementada aqui — apenas a forma dos dados.
 
+// Memória conversacional de curto prazo (últimas trocas, incluindo a
+// mensagem atual do cliente como última entrada quando aplicável). Usada
+// somente como contexto linguístico para o planejamento/verbalização NVIDIA
+// (referências, correções, continuidade) — nunca como fonte de preço,
+// produto, endereço ou horário. Ver src/agent/short-history.ts.
+export type AgentShortHistoryEntry = {
+  role: "customer" | "agent";
+  text: string;
+  at: string;
+  messageId?: string;
+};
+
 export type AgentConversationStep =
   | "START"
   | "BROWSING_MENU"
@@ -43,4 +55,7 @@ export type AgentSession = {
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
+  // Opcional por compatibilidade: sessões persistidas antes desta mudança
+  // não têm o campo. Sempre tratado como [] quando ausente.
+  shortHistory?: AgentShortHistoryEntry[];
 };

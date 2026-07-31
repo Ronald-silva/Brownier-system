@@ -536,7 +536,25 @@ test("82a. NVIDIA_NEMOTRON lê os limites locais", () => {
     nvidiaBaseUrl: "https://integrate.api.nvidia.com/v1",
     maxRequestsPerMinute: 12,
     maxConcurrentRequests: 3,
+    verbalizationMode: "DISABLED",
   });
+});
+
+test("82b. NVIDIA_NEMOTRON lê BF_VERBALIZATION_MODE=ENABLED", () => {
+  const result = readLlmRuntimeConfig(validNvidiaEnv({ BF_VERBALIZATION_MODE: "ENABLED" }));
+  assert.equal(result.mode, "NVIDIA_NEMOTRON");
+  assert.equal((result as { verbalizationMode: string }).verbalizationMode, "ENABLED");
+});
+
+test("82c. BF_VERBALIZATION_MODE ausente ou vazio equivale a DISABLED", () => {
+  const withoutVar = readLlmRuntimeConfig(validNvidiaEnv({ BF_VERBALIZATION_MODE: undefined }));
+  const withEmptyVar = readLlmRuntimeConfig(validNvidiaEnv({ BF_VERBALIZATION_MODE: "" }));
+  assert.equal((withoutVar as { verbalizationMode: string }).verbalizationMode, "DISABLED");
+  assert.equal((withEmptyVar as { verbalizationMode: string }).verbalizationMode, "DISABLED");
+});
+
+test("82d. BF_VERBALIZATION_MODE inválido é rejeitado", () => {
+  assertThrowsWithCode(validNvidiaEnv({ BF_VERBALIZATION_MODE: "MAYBE" }), "INVALID_VERBALIZATION_MODE");
 });
 
 test("83. OPENAI_FALLBACK ignora variáveis NVIDIA inválidas", () => {

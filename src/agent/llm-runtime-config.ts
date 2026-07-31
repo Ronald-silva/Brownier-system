@@ -21,6 +21,11 @@ export type LlmRuntimeConfig =
       nvidiaBaseUrl: string;
       maxRequestsPerMinute: number;
       maxConcurrentRequests: number;
+      // BF_VERBALIZATION_MODE=DISABLED|ENABLED (padrão DISABLED). Com
+      // DISABLED, o Renderer usa exclusivamente template/fallback — mesmo
+      // com todo o código de verbalização já presente. Só ligado quando
+      // BF_LLM_MODE=NVIDIA_NEMOTRON (nenhum outro provider é ativado).
+      verbalizationMode: "DISABLED" | "ENABLED";
     };
 
 export type LlmRuntimeConfigErrorCode =
@@ -32,7 +37,8 @@ export type LlmRuntimeConfigErrorCode =
   | "INVALID_LLM_MAX_CONCURRENT_REQUESTS"
   | "MISSING_NVIDIA_API_KEY"
   | "INVALID_NVIDIA_MODEL"
-  | "INVALID_NVIDIA_BASE_URL";
+  | "INVALID_NVIDIA_BASE_URL"
+  | "INVALID_VERBALIZATION_MODE";
 
 // Mensagem nunca inclui o valor de nenhuma variável — só o nome da
 // variável envolvida, quando ajuda a diagnosticar.
@@ -119,6 +125,13 @@ function readNvidiaBaseUrl(raw: string | undefined): string {
   return trimmed;
 }
 
+function readVerbalizationMode(raw: string | undefined): "DISABLED" | "ENABLED" {
+  const trimmed = trimOrEmpty(raw);
+  if (trimmed === "" || trimmed === "DISABLED") return "DISABLED";
+  if (trimmed === "ENABLED") return "ENABLED";
+  throw new LlmRuntimeConfigError("INVALID_VERBALIZATION_MODE", "BF_VERBALIZATION_MODE contém um valor não reconhecido");
+}
+
 export function readLlmRuntimeConfig(env: Record<string, string | undefined>): LlmRuntimeConfig {
   const mode = trimOrEmpty(env.BF_LLM_MODE);
 
@@ -143,7 +156,8 @@ export function readLlmRuntimeConfig(env: Record<string, string | undefined>): L
       "INVALID_LLM_MAX_CONCURRENT_REQUESTS",
       "BF_LLM_MAX_CONCURRENT_REQUESTS",
     );
-    return { mode: "NVIDIA_NEMOTRON", nvidiaApiKey, nvidiaModel, nvidiaBaseUrl, maxRequestsPerMinute, maxConcurrentRequests };
+    const verbalizationMode = readVerbalizationMode(env.BF_VERBALIZATION_MODE);
+    return { mode: "NVIDIA_NEMOTRON", nvidiaApiKey, nvidiaModel, nvidiaBaseUrl, maxRequestsPerMinute, maxConcurrentRequests, verbalizationMode };
   }
   if (mode !== "OPENAI_FALLBACK") {
     throw new LlmRuntimeConfigError("INVALID_LLM_MODE", "BF_LLM_MODE contém um valor não reconhecido");

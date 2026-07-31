@@ -6,7 +6,8 @@
 // messageId e encaminhamento humano automático ao atingir o limite. Não
 // implementa IA, não chama API externa e não duplica as regras já
 // implementadas pelo Conversation Service/Engine — apenas orquestra.
-import type { AgentSession } from "./session.types.ts";
+import { randomUUID } from "node:crypto";
+import type { AgentSession, AgentShortHistoryEntry } from "./session.types.ts";
 import type { AgentSessionStore } from "./session.store.ts";
 import { buildAgentSessionKey } from "./session.store.ts";
 import type { AgentTools } from "./tools.ts";
@@ -46,6 +47,19 @@ import { executeConversationActionBatch, isFailureResult } from "./conversation-
 import { resolveFactualIntent } from "./factual-intent.ts";
 import type { OperatingStatus } from "./operating-status.ts";
 import { WEEKDAY_LABELS_PT_BR, formatTimeBR } from "../lib/business-hours.ts";
+import { buildAllowedFacts } from "./allowed-facts.ts";
+import { decideRenderStrategy } from "./response-strategy-policy.ts";
+import { computePlanningFailureFallback } from "./planning-failure-fallback.ts";
+import { validateResponseText } from "./response-text-validator.ts";
+import { appendShortHistory, appendShortHistoryTurn } from "./short-history.ts";
+import { MESSAGE_CATALOG } from "./messages.ts";
+import type {
+  AllowedFact,
+  ResponseIntent,
+  VerbalizationRequest,
+  VerbalizationResult,
+} from "./conversation-intelligence.types.ts";
+import { LLM_VERBALIZER_PROMPT_VERSION } from "./llm-verbalizer-prompt.ts";
 
 export class TextConversationServiceError extends Error {
   code: string;
@@ -80,6 +94,8 @@ export type InterpretMessageFn = (input: InterpretDeterministicMessageInput) => 
 
 export type InterpretWithLlmFn = (input: InterpretLlmMessageInput) => Promise<LlmInterpretationResult>;
 
+export type VerbalizeWithLlmFn = (request: VerbalizationRequest) => Promise<VerbalizationResult>;
+
 export type CreateTextConversationServiceDependencies = {
   conversationService: AgentConversationService;
   sessionStore: AgentSessionStore;
@@ -91,6 +107,13 @@ export type CreateTextConversationServiceDependencies = {
   interpretWithLlm?: InterpretWithLlmFn;
   llmMode?: "DISABLED" | "FALLBACK";
   maxLlmInputLength?: number;
+  // BF_VERBALIZATION_MODE=DISABLED|ENABLED (padrão DISABLED). Só tem efeito
+  // quando llmMode === "FALLBACK" e verbalizeWithLlm/llmVerbalizer estão
+  // presentes — com DISABLED (ou ausente), o comportamento é idêntico ao de
+  // antes desta funcionalidade: sempre template.
+  verbalizationMode?: "DISABLED" | "ENABLED";
+  verbalizeWithLlm?: VerbalizeWithLlmFn;
+  now?: () => Date;
 };
 
 export type ProcessTextInput = {
@@ -405,6 +428,107 @@ function llmRecoveryKind(session: AgentSession): "START" | "ORDER" {
   return session.step === "START" || session.step === "BROWSING_MENU" ? "START" : "ORDER";
 }
 
+const DEFAULT_CONFIRM_RESPONSE_INTENT: ResponseIntent = { kind: "CONFIRM_ACTION_RESULT" };
+
+const MAX_HANDOFF_PENDING_QUESTION_LENGTH = 140;
+
+// Resumo sanitizado anexado ao evento de encaminhamento humano (automático
+// ou por intenção REQUEST_HUMAN) — nunca token, telefone completo ou payload
+// bruto, nunca promete tempo de resposta. Só o essencial para o atendente
+// retomar o contexto: intenção, itens do carrinho e a última pergunta.
+export type HandoffSummary = {
+  intent: string;
+  cartItemCount: number;
+  pendingQuestion: string;
+};
+
+function buildHandoffSummary(input: { session: AgentSession; intent: string; lastCustomerMessage: string }): HandoffSummary {
+  const trimmed = typeof input.lastCustomerMessage === "string" ? input.lastCustomerMessage.trim() : "";
+  return {
+    intent: input.intent,
+    cartItemCount: input.session.items.reduce((sum, item) => sum + item.quantity, 0),
+    pendingQuestion: trimmed.length > MAX_HANDOFF_PENDING_QUESTION_LENGTH ? `${trimmed.slice(0, MAX_HANDOFF_PENDING_QUESTION_LENGTH)}…` : trimmed,
+  };
+}
+
+// Tenta a chamada NVIDIA #2 + o validador fail-closed; qualquer falha (rede,
+// timeout, JSON malformado, grounding reprovado) devolve undefined — nunca
+// lança, nunca deixa o chamador sem uma resposta. O chamador sempre tem um
+// template pronto para usar como fallback (fallbackMessageKey já calculado
+// antes desta tentativa).
+async function tryVerbalize(params: {
+  verbalizeWithLlm: VerbalizeWithLlmFn;
+  currentCustomerMessage: string;
+  shortHistory: AgentShortHistoryEntry[];
+  responseIntent: ResponseIntent;
+  facts: AllowedFact[];
+  businessName: string;
+  catalogProductNames: string[];
+}): Promise<AgentChatMessage[] | undefined> {
+  try {
+    const result = await params.verbalizeWithLlm({
+      currentCustomerMessage: params.currentCustomerMessage,
+      shortHistory: params.shortHistory,
+      responseIntent: params.responseIntent,
+      facts: params.facts,
+      businessName: params.businessName,
+      promptVersion: LLM_VERBALIZER_PROMPT_VERSION,
+    });
+    if (result.status !== "VERBALIZED") return undefined;
+    const validation = validateResponseText({
+      text: result.text,
+      usedFactIds: result.usedFactIds,
+      facts: params.facts,
+      catalogProductNames: params.catalogProductNames,
+    });
+    if (!validation.ok) return undefined;
+    return [{ id: randomUUID(), type: "text", text: result.text, metadata: { verbalized: true } }];
+  } catch {
+    return undefined;
+  }
+}
+
+// Decide TEMPLATE vs. VERBALIZE (response-strategy-policy.ts, sempre
+// determinístico) e, só quando VERBALIZE, tenta a verbalização — caindo
+// sempre de volta para templateMessages em qualquer falha ou quando a
+// funcionalidade está desligada (comportamento idêntico ao anterior).
+async function renderTurnMessages(params: {
+  verbalizationEnabled: boolean;
+  verbalizeWithLlm?: VerbalizeWithLlmFn;
+  templateMessages: AgentChatMessage[];
+  responseIntent: ResponseIntent;
+  confidence: "HIGH" | "LOW";
+  facts: AllowedFact[];
+  currentCustomerMessage: string;
+  shortHistory: AgentShortHistoryEntry[];
+  businessName: string;
+  catalogProductNames: string[];
+  // Sinal determinístico (nunca vindo do modelo) do que o Engine realmente
+  // executou neste turno — ver Regra 0 de response-strategy-policy.ts.
+  executedActionType?: string;
+  messageKey?: string;
+}): Promise<AgentChatMessage[]> {
+  if (!params.verbalizationEnabled || !params.verbalizeWithLlm) return params.templateMessages;
+  const strategy = decideRenderStrategy({
+    confidence: params.confidence,
+    responseIntent: params.responseIntent,
+    facts: params.facts,
+    executedActionType: params.executedActionType,
+    messageKey: params.messageKey,
+  });
+  if (strategy !== "VERBALIZE") return params.templateMessages;
+  const verbalized = await tryVerbalize({
+    verbalizeWithLlm: params.verbalizeWithLlm,
+    currentCustomerMessage: params.currentCustomerMessage,
+    shortHistory: params.shortHistory,
+    responseIntent: params.responseIntent,
+    facts: params.facts,
+    businessName: params.businessName,
+    catalogProductNames: params.catalogProductNames,
+  });
+  return verbalized ?? params.templateMessages;
+}
+
 export function createTextConversationService(
   deps: CreateTextConversationServiceDependencies,
 ): TextConversationService {
@@ -428,7 +552,35 @@ export function createTextConversationService(
     deps.interpretWithLlm ?? (deps.llmInterpreter ? input => deps.llmInterpreter!.interpret(input) : undefined);
   const llmEnabled = llmMode === "FALLBACK" && typeof interpretWithLlm === "function";
 
+  const verbalizeWithLlm = deps.verbalizeWithLlm;
+  const verbalizationEnabled = llmEnabled && deps.verbalizationMode === "ENABLED" && typeof verbalizeWithLlm === "function";
+  // Histórico curto só é gravado quando o planejamento NVIDIA está de fato
+  // ligado — sem isso, nada consome shortHistory e a sessão continua
+  // exatamente na forma de hoje (campo nunca aparece por padrão).
+  const shortHistoryEnabled = llmEnabled;
+  const now = deps.now ?? (() => new Date());
+
   const sessionLocks = new Map<string, Promise<unknown>>();
+
+  // Grava a troca (mensagem do cliente + texto final do agente) no
+  // histórico curto já persistido pelo mesmo PostgresConversationState que
+  // salva o resto da sessão — nenhuma tabela nova. Só chamado quando
+  // shortHistoryEnabled; nunca fonte de fato (ver short-history.ts).
+  function persistShortHistory(
+    sessionKey: string,
+    beforeHistory: AgentShortHistoryEntry[] | undefined,
+    input: { customerText: string; customerMessageId?: string; agentText: string },
+  ): AgentSession {
+    const at = now().toISOString();
+    const nextHistory = appendShortHistoryTurn(beforeHistory, {
+      customerText: input.customerText,
+      customerAt: at,
+      ...(input.customerMessageId ? { customerMessageId: input.customerMessageId } : {}),
+      agentText: input.agentText,
+      agentAt: at,
+    });
+    return sessionStore.update(sessionKey, current => ({ ...current, shortHistory: nextHistory }));
+  }
 
   // Mutex local por sessionKey — só serializa chamadas dentro deste
   // processo/instância (Map em closure, não é singleton global nem promete
@@ -565,17 +717,65 @@ export function createTextConversationService(
           maxLlmInputLength,
         });
         if (eligibility.eligible) {
-          llmOutcome = await interpretWithLlm!({ text, session: sessionBefore, context, deterministicResult: interpretation });
+          llmOutcome = await interpretWithLlm!({
+            text,
+            session: sessionBefore,
+            context,
+            deterministicResult: interpretation,
+            ...(shortHistoryEnabled ? { shortHistory: appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString(), ...(messageId ? { messageId } : {}) }) } : {}),
+          });
         }
       }
 
       if (llmOutcome?.status === "PROVIDER_ERROR") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfterUnchanged = structuredClone(sessionStore.get(sessionKey)!);
+        // Fallback contextual (nunca o texto genérico incondicional de
+        // antes, exceto como último recurso explícito): reexecuta a
+        // checagem factual determinística e, se não bater, reapresenta o
+        // que a etapa atual já pede.
+        const fallback = computePlanningFailureFallback({
+          currentMessage: text,
+          session: sessionBefore,
+          address: tools.getBusinessAddress?.(),
+          operatingStatus: tools.getOperatingStatus?.(),
+          reason: "PROVIDER_ERROR",
+        });
+        // Último recurso (session.step === START sem nenhum sinal factual):
+        // mantém exatamente o comportamento já testado (texto varia por
+        // recovery, nunca o texto genérico cru).
+        if (fallback.messageKey === "POLICY_LLM_TEMPORARILY_UNAVAILABLE") {
+          const policyResult: TextConversationPolicyResult = {
+            event: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+            messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
+            data: { recovery: llmRecoveryKind(sessionBefore) },
+          };
+          return {
+            sessionKey,
+            duplicateMessage: false,
+            interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "POLICY" },
+            sessionBefore,
+            sessionAfter: sessionAfterUnchanged,
+            policyResult,
+            messages: renderTextConversationPolicyMessage(policyResult),
+            policy: {
+              misunderstandingCountBefore,
+              misunderstandingCountAfter: misunderstandingCountBefore,
+              handoffTriggered: false,
+              counterReset: false,
+              technicalFailure: true,
+            },
+          };
+        }
+        const presentation = buildConversationPresentation({
+          result: { session: sessionAfterUnchanged, previousStep: sessionAfterUnchanged.step, currentStep: sessionAfterUnchanged.step, event: fallback.messageKey, messageKey: fallback.messageKey, data: fallback.data },
+          session: sessionAfterUnchanged,
+          tools,
+        });
         const policyResult: TextConversationPolicyResult = {
-          event: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
-          messageKey: "POLICY_LLM_TEMPORARILY_UNAVAILABLE",
-          data: { recovery: llmRecoveryKind(sessionBefore) },
+          event: fallback.messageKey,
+          messageKey: fallback.messageKey,
+          data: { recovery: llmRecoveryKind(sessionBefore), ...(fallback.data ?? {}) },
         };
         return {
           sessionKey,
@@ -584,7 +784,7 @@ export function createTextConversationService(
           sessionBefore,
           sessionAfter: sessionAfterUnchanged,
           policyResult,
-          messages: renderTextConversationPolicyMessage(policyResult),
+          messages: renderConversationPresentation(presentation),
           policy: {
             misunderstandingCountBefore,
             misunderstandingCountAfter: misunderstandingCountBefore,
@@ -600,18 +800,50 @@ export function createTextConversationService(
           conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: llmOutcome.actions[0]!,
         });
         const presentation = buildConversationPresentation({ result: engineResult, session: sessionAfter, tools });
-        const messages = renderConversationPresentation(presentation);
+        const templateMessages = renderConversationPresentation(presentation);
+        const responseIntent = llmOutcome.responseIntent ?? DEFAULT_CONFIRM_RESPONSE_INTENT;
+        const confidence = llmOutcome.confidence ?? "HIGH";
+        const facts = buildAllowedFacts({
+          result: engineResult,
+          tools,
+          operatingStatus: tools.getOperatingStatus?.(),
+          requestedFactKeys: responseIntent.kind === "ANSWER_FACTUAL" ? responseIntent.factKeys : undefined,
+        });
+        const messages = await renderTurnMessages({
+          verbalizationEnabled,
+          verbalizeWithLlm,
+          templateMessages,
+          responseIntent,
+          confidence,
+          facts,
+          currentCustomerMessage: text,
+          shortHistory: appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString() }),
+          businessName: tools.getBusiness().name,
+          catalogProductNames: tools.listProducts().map(p => p.name),
+          executedActionType: llmOutcome.actions[0]!.type,
+          messageKey: engineResult.messageKey,
+        });
+        let finalSessionAfter = sessionAfter;
+        if (shortHistoryEnabled) {
+          finalSessionAfter = structuredClone(
+            persistShortHistory(sessionKey, sessionBefore.shortHistory, {
+              customerText: text,
+              ...(messageId ? { customerMessageId: messageId } : {}),
+              agentText: messages.map(m => m.text).join(" "),
+            }),
+          );
+        }
         return {
           sessionKey,
           duplicateMessage: false,
           interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "LLM" },
           sessionBefore,
-          sessionAfter,
-          result: { ...engineResult, session: structuredClone(sessionAfter) },
+          sessionAfter: finalSessionAfter,
+          result: { ...engineResult, session: structuredClone(finalSessionAfter) },
           messages,
           policy: {
             misunderstandingCountBefore,
-            misunderstandingCountAfter: sessionAfter.misunderstandingCount,
+            misunderstandingCountAfter: finalSessionAfter.misunderstandingCount,
             handoffTriggered: false,
             counterReset,
           },
@@ -636,7 +868,37 @@ export function createTextConversationService(
           }
           sessionAfter = structuredClone(sessionAfter);
           const presentation = buildConversationPresentation({ result: lastResult.result, session: sessionAfter, tools });
-          const messages = renderConversationPresentation(presentation);
+          const templateMessages = renderConversationPresentation(presentation);
+          const responseIntent = llmOutcome.responseIntent ?? DEFAULT_CONFIRM_RESPONSE_INTENT;
+          const confidence = llmOutcome.confidence ?? "HIGH";
+          const facts = buildAllowedFacts({
+            result: lastResult.result,
+            tools,
+            operatingStatus: tools.getOperatingStatus?.(),
+            requestedFactKeys: responseIntent.kind === "ANSWER_FACTUAL" ? responseIntent.factKeys : undefined,
+          });
+          const messages = await renderTurnMessages({
+            verbalizationEnabled,
+            verbalizeWithLlm,
+            templateMessages,
+            responseIntent,
+            confidence,
+            facts,
+            currentCustomerMessage: text,
+            shortHistory: appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString() }),
+            businessName: tools.getBusiness().name,
+            catalogProductNames: tools.listProducts().map(p => p.name),
+            messageKey: lastResult.result.messageKey,
+          });
+          if (shortHistoryEnabled) {
+            sessionAfter = structuredClone(
+              persistShortHistory(sessionKey, sessionBefore.shortHistory, {
+                customerText: text,
+                ...(messageId ? { customerMessageId: messageId } : {}),
+                agentText: messages.map(m => m.text).join(" "),
+              }),
+            );
+          }
           return {
             sessionKey,
             duplicateMessage: false,
@@ -705,6 +967,74 @@ export function createTextConversationService(
         // compreensão abaixo (mesma mensagem/incremento de uma falha comum).
       }
 
+      // Intenções não-transacionais identificadas pelo planejamento —
+      // reconhecidas naturalmente, sem contar como "não entendi" e sem
+      // empurrar o pedido. Nunca vindas do determinístico (que já trataria
+      // REQUEST_HUMAN/comandos globais antes de chegar aqui) — só do plano
+      // NVIDIA, quando a ação de negócio não é o caso.
+      if (llmOutcome?.status === "NOT_UNDERSTOOD" && llmOutcome.intent && llmOutcome.intent !== "UNRECOGNIZED" && llmOutcome.intent !== "BUSINESS_ACTION" && llmOutcome.intent !== "FACTUAL_QUESTION" && llmOutcome.intent !== "CLARIFICATION_NEEDED") {
+        const intent = llmOutcome.intent;
+        const confidence = llmOutcome.confidence ?? "HIGH";
+        const currentShortHistory = appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString() });
+
+        if (intent === "REQUEST_HUMAN") {
+          const { engineResult, sessionAfter: handoffSessionAfter, counterReset } = applySingleAction({
+            conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: { type: "REQUEST_HUMAN" },
+          });
+          const templateMessages = renderConversationPresentation(
+            buildConversationPresentation({ result: engineResult, session: handoffSessionAfter, tools }),
+          );
+          const responseIntent: ResponseIntent = llmOutcome.responseIntent ?? { kind: "REQUEST_HUMAN_ACK" };
+          const messages = await renderTurnMessages({
+            verbalizationEnabled, verbalizeWithLlm, templateMessages, responseIntent, confidence, facts: [],
+            currentCustomerMessage: text, shortHistory: currentShortHistory,
+            businessName: tools.getBusiness().name, catalogProductNames: tools.listProducts().map(p => p.name),
+          });
+          let finalSessionAfter = handoffSessionAfter;
+          if (shortHistoryEnabled) {
+            finalSessionAfter = structuredClone(persistShortHistory(sessionKey, sessionBefore.shortHistory, {
+              customerText: text, ...(messageId ? { customerMessageId: messageId } : {}), agentText: messages.map(m => m.text).join(" "),
+            }));
+          }
+          return {
+            sessionKey, duplicateMessage: false,
+            interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "LLM" },
+            sessionBefore, sessionAfter: finalSessionAfter,
+            result: { ...engineResult, session: structuredClone(finalSessionAfter), data: { ...engineResult.data, handoffSummary: buildHandoffSummary({ session: finalSessionAfter, intent, lastCustomerMessage: text }) } },
+            messages,
+            policy: { misunderstandingCountBefore, misunderstandingCountAfter: finalSessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
+          };
+        }
+
+        const messageKey = intent === "SOCIAL" ? "SOCIAL_ACKNOWLEDGED" : intent === "OBJECTION" ? "OBJECTION_ACKNOWLEDGED" : "OUT_OF_SCOPE_DECLINED";
+        const defaultResponseIntent: ResponseIntent =
+          intent === "SOCIAL" ? { kind: "SOCIAL_ACK" } : intent === "OBJECTION" ? { kind: "ACKNOWLEDGE_OBJECTION" } : { kind: "DECLINE_OUT_OF_SCOPE" };
+        const responseIntent = llmOutcome.responseIntent ?? defaultResponseIntent;
+        if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
+        const sessionAfterUnchanged = structuredClone(sessionStore.get(sessionKey)!);
+        const templateMessages: AgentChatMessage[] = [
+          { id: randomUUID(), type: "text", text: MESSAGE_CATALOG[messageKey]!, metadata: { messageKey } },
+        ];
+        const messages = await renderTurnMessages({
+          verbalizationEnabled, verbalizeWithLlm, templateMessages, responseIntent, confidence, facts: [],
+          currentCustomerMessage: text, shortHistory: currentShortHistory,
+          businessName: tools.getBusiness().name, catalogProductNames: tools.listProducts().map(p => p.name),
+        });
+        let finalSessionAfter = sessionAfterUnchanged;
+        if (shortHistoryEnabled) {
+          finalSessionAfter = structuredClone(persistShortHistory(sessionKey, sessionBefore.shortHistory, {
+            customerText: text, ...(messageId ? { customerMessageId: messageId } : {}), agentText: messages.map(m => m.text).join(" "),
+          }));
+        }
+        const policyResult: TextConversationPolicyResult = { event: messageKey, messageKey };
+        return {
+          sessionKey, duplicateMessage: false,
+          interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "LLM" },
+          sessionBefore, sessionAfter: finalSessionAfter, policyResult, messages,
+          policy: { misunderstandingCountBefore, misunderstandingCountAfter: misunderstandingCountBefore, handoffTriggered: false, counterReset: false },
+        };
+      }
+
       const failure: { status: "NOT_UNDERSTOOD" | "AMBIGUOUS"; suggestions: string[] } =
         llmOutcome?.status === "NOT_UNDERSTOOD"
           ? { status: "NOT_UNDERSTOOD", suggestions: publicSuggestions(llmOutcome.suggestions) }
@@ -736,7 +1066,11 @@ export function createTextConversationService(
       const remainingAttempts = Math.max(maxMisunderstandings - newCount, 0);
 
       const policyResult: TextConversationPolicyResult = handoffTriggered
-        ? { event: "HUMAN_HANDOFF_AUTOMATIC", messageKey: "HUMAN_HANDOFF_AUTOMATIC", data: { misunderstandingCount: newCount } }
+        ? {
+            event: "HUMAN_HANDOFF_AUTOMATIC",
+            messageKey: "HUMAN_HANDOFF_AUTOMATIC",
+            data: { misunderstandingCount: newCount, handoffSummary: buildHandoffSummary({ session: sessionAfter, intent: "UNRECOGNIZED", lastCustomerMessage: text }) },
+          }
         : failure.status === "AMBIGUOUS"
           ? { event: "INTERPRETATION_AMBIGUOUS", messageKey: "INTERPRETATION_AMBIGUOUS", data: { misunderstandingCount: newCount } }
           : {

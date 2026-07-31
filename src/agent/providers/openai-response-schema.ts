@@ -169,6 +169,73 @@ const ACTION_SCHEMAS = [
   RESET_CONVERSATION,
 ] as const;
 
+// Planejamento estendido (aditivo, opcional — nunca em `required`, para não
+// quebrar provedores/testes que ainda devolvem só o schema original):
+// intent (tipo comunicativo), confidence e responseIntent (objetivo
+// comunicativo do turno, nunca uma escolha de canal — ver
+// conversation-intelligence.types.ts). "USE_TEMPLATE" nunca existe em
+// nenhuma variante: essa decisão é sempre do servidor
+// (response-strategy-policy.ts), nunca algo que o modelo possa produzir.
+const CONVERSATION_INTENT_ENUM = [
+  "BUSINESS_ACTION",
+  "SOCIAL",
+  "FACTUAL_QUESTION",
+  "CLARIFICATION_NEEDED",
+  "OBJECTION",
+  "OUT_OF_SCOPE",
+  "REQUEST_HUMAN",
+  "UNRECOGNIZED",
+] as const;
+
+const ALLOWED_FACT_KEY_ENUM = [
+  "PRODUCT",
+  "CART_SUMMARY",
+  "ORDER_CONFIRMATION",
+  "BUSINESS_ADDRESS",
+  "OPERATING_STATUS",
+  "PICKUP_SLOTS",
+  "PAYMENT_OPTIONS",
+  "MISSING_FIELDS",
+  "ORDER_FAILURE_REASON",
+] as const;
+
+const AMBIGUITY_REASON_MAX_LENGTH = 300;
+const FACT_KEYS_MAX = ALLOWED_FACT_KEY_ENUM.length;
+
+function responseIntentVariant<T extends string>(kind: T, extraProperties: Record<string, unknown> = {}, extraRequired: string[] = []) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["kind", ...extraRequired],
+    properties: { kind: { const: kind }, ...extraProperties },
+  } as const;
+}
+
+const RESPONSE_INTENT_SCHEMA = {
+  oneOf: [
+    responseIntentVariant("SOCIAL_ACK"),
+    responseIntentVariant(
+      "ANSWER_FACTUAL",
+      { factKeys: { type: "array", minItems: 1, maxItems: FACT_KEYS_MAX, items: { type: "string", enum: [...ALLOWED_FACT_KEY_ENUM] } } },
+      ["factKeys"],
+    ),
+    responseIntentVariant("CONFIRM_ACTION_RESULT"),
+    responseIntentVariant(
+      "ASK_CLARIFICATION",
+      { ambiguityReason: { type: "string", minLength: 1, maxLength: AMBIGUITY_REASON_MAX_LENGTH } },
+      ["ambiguityReason"],
+    ),
+    responseIntentVariant(
+      "OFFER_SUGGESTION",
+      { productIds: { type: "array", minItems: 0, maxItems: MAX_ACTIONS, items: { type: "string", minLength: 1, maxLength: PRODUCT_ID_MAX_LENGTH } } },
+      ["productIds"],
+    ),
+    responseIntentVariant("ACKNOWLEDGE_OBJECTION"),
+    responseIntentVariant("DECLINE_OUT_OF_SCOPE"),
+    responseIntentVariant("REQUEST_HUMAN_ACK"),
+  ],
+} as const;
+
 // Saída completa aceita do LLM Interpreter. MATCHED exige actions
 // não-vazio e NOT_UNDERSTOOD/AMBIGUOUS exigem actions vazio na prática —
 // essa regra condicional por status permanece no validator local
@@ -193,5 +260,8 @@ export const OPENAI_LLM_RESPONSE_SCHEMA = {
       maxItems: MAX_SUGGESTIONS,
       items: { type: "string", minLength: 1, maxLength: SUGGESTION_MAX_LENGTH },
     },
+    intent: { type: ["string", "null"], enum: [...CONVERSATION_INTENT_ENUM, null] },
+    confidence: { type: ["string", "null"], enum: ["HIGH", "LOW", null] },
+    responseIntent: { anyOf: [RESPONSE_INTENT_SCHEMA, { type: "null" }] },
   },
 } as const;

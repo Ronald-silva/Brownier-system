@@ -5,8 +5,10 @@
 // de entrada, do contrato do provider e do resultado já validado. Esta etapa
 // não integra o LLM Interpreter ao Text Conversation Service.
 import type { AgentConversationAction } from "./conversation.types.ts";
-import type { AgentSession } from "./session.types.ts";
+import type { AgentSession, AgentShortHistoryEntry } from "./session.types.ts";
 import type { DeterministicInterpretationResult } from "./interpreter.types.ts";
+import type { ConversationIntent, ResponseIntent } from "./conversation-intelligence.types.ts";
+import type { OperatingStatus } from "./operating-status.ts";
 
 // --- contrato do provider ---------------------------------------------------
 
@@ -35,12 +37,17 @@ export type LlmInterpreterPublicProduct = {
 
 // Apenas dados já públicos (mesmo formato que o Deterministic Interpreter já
 // recebe) — nunca custo, margem, estoque administrativo ou configuração
-// interna.
+// interna. operatingStatus/businessAddress ajudam o planejamento a
+// reconhecer corretamente uma pergunta factual (intent) — nunca são usados
+// como fonte de verdade na resposta final: isso continua exclusivo de
+// allowed-facts.ts, computado depois da execução real.
 export type LlmInterpreterContext = {
   products?: LlmInterpreterPublicProduct[];
   paymentOptions?: string[];
   pickupSlots?: string[];
   businessName?: string;
+  operatingStatus?: OperatingStatus;
+  businessAddress?: string;
 };
 
 // --- entrada do interpretador ------------------------------------------------
@@ -50,6 +57,10 @@ export type InterpretLlmMessageInput = {
   session: AgentSession;
   context?: LlmInterpreterContext;
   deterministicResult?: DeterministicInterpretationResult;
+  // Histórico curto (últimas trocas, mensagem atual inclusa) — só contexto
+  // linguístico para o planejamento (referências, correções, continuidade).
+  // Nunca usado como fonte de fato; ver session.types.ts/short-history.ts.
+  shortHistory?: AgentShortHistoryEntry[];
 };
 
 export type CreateLlmInterpreterInput = {
@@ -68,6 +79,13 @@ export type LlmInterpretationMatched = {
   explanationCode?: string;
   promptVersion: string;
   durationMs: number;
+  // Planejamento estendido (aditivo, sempre opcional): intenção comunicativa
+  // e confiança do plano — usados por response-strategy-policy.ts para
+  // decidir template vs. verbalização. Ausência nunca é erro: o caminho
+  // determinístico e provedores mais antigos continuam funcionando sem eles.
+  intent?: ConversationIntent;
+  responseIntent?: ResponseIntent;
+  confidence?: "HIGH" | "LOW";
 };
 
 export type LlmInterpretationNotUnderstood = {
@@ -77,6 +95,9 @@ export type LlmInterpretationNotUnderstood = {
   source: "LLM";
   promptVersion: string;
   durationMs: number;
+  intent?: ConversationIntent;
+  responseIntent?: ResponseIntent;
+  confidence?: "HIGH" | "LOW";
 };
 
 export type LlmInterpretationCandidate = {
@@ -91,6 +112,9 @@ export type LlmInterpretationAmbiguous = {
   source: "LLM";
   promptVersion: string;
   durationMs: number;
+  intent?: ConversationIntent;
+  responseIntent?: ResponseIntent;
+  confidence?: "HIGH" | "LOW";
 };
 
 // Saída do provider foi recebida, mas rejeitada localmente (ação proibida,

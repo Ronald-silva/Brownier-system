@@ -34,6 +34,8 @@ export function createWhatsappConversationRuntime(input: {
   });
   const llmMode = llmRuntime.llmMode === "DISABLED" ? "DISABLED" : "FALLBACK";
   const llmInterpreter = llmRuntime.llmMode === "DISABLED" ? undefined : llmRuntime.llmInterpreter;
+  const verbalizationMode = llmRuntime.llmMode === "NVIDIA_NEMOTRON" ? llmRuntime.verbalizationMode : "DISABLED";
+  const llmVerbalizer = llmRuntime.llmMode === "NVIDIA_NEMOTRON" ? llmRuntime.llmVerbalizer : undefined;
   const sessionLocks = new Map<string, Promise<unknown>>();
 
   function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -92,6 +94,9 @@ export function createWhatsappConversationRuntime(input: {
           maxMisunderstandings: input.maxMisunderstandings,
           llmMode,
           ...(llmInterpreter === undefined ? {} : { llmInterpreter }),
+          verbalizationMode,
+          ...(llmVerbalizer === undefined ? {} : { verbalizeWithLlm: (request) => llmVerbalizer!.verbalize(request) }),
+          now: input.now,
         });
         const result = await textService.processText(message);
         if (store.orders.length !== orderCountBefore) await input.saveDomainStore(store);

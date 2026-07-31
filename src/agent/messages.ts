@@ -157,6 +157,15 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   BUSINESS_PICKUP_HOURS_UNAVAILABLE:
     "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
+
+  // Reconhecimento de intenções não-transacionais identificadas pelo
+  // planejamento (ConversationIntent) — nunca mudam de assunto nem empurram
+  // o pedido automaticamente. Usados como TEMPLATE por padrão e como
+  // fallbackMessageKey quando a verbalização está habilitada mas falha.
+  SOCIAL_ACKNOWLEDGED: "Fico à disposição! Posso ajudar com mais alguma coisa?",
+  OBJECTION_ACKNOWLEDGED: "Entendo a preocupação com o valor. Posso ajudar com mais alguma dúvida sobre os itens?",
+  OUT_OF_SCOPE_DECLINED:
+    "Isso foge um pouco do que consigo ajudar por aqui. Posso ajudar com o cardápio, com o seu pedido ou com informações da loja.",
 };
 
 export const ALL_MESSAGE_KEYS: readonly string[] = Object.keys(MESSAGE_CATALOG);

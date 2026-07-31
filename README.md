@@ -44,6 +44,7 @@ somente no `.env` local ou no provedor de deploy.
 | `BF_LLM_MODE` | Não | `DISABLED` (padrão), `OPENAI_FALLBACK` ou `NVIDIA_NEMOTRON`. |
 | `OPENAI_*` e limites `BF_LLM_*` | Condicional | Necessários somente em `OPENAI_FALLBACK`. |
 | `NVIDIA_*` | Condicional | Necessários/configuráveis somente em `NVIDIA_NEMOTRON`. |
+| `BF_VERBALIZATION_MODE` | Não | `DISABLED` (padrão) ou `ENABLED`. Só tem efeito com `BF_LLM_MODE=NVIDIA_NEMOTRON`: liga a verbalização NVIDIA (chamada #2) do fluxo híbrido — com `DISABLED`, a resposta é sempre por template/fallback, mesmo com o restante do pipeline já ativo. |
 | `EVOLUTION_BASE_URL`, `EVOLUTION_INSTANCE_NAME`, `EVOLUTION_INSTANCE_TOKEN` | Condicional | Integração Evolution Go 0.7.2. Devem ser definidos juntos; o token é individual da instância. |
 | `EVOLUTION_WEBHOOK_TOKEN` | Sim, em produção e quando Evolution estiver configurado | Segredo exclusivo do endpoint de webhook do Brownier. |
 

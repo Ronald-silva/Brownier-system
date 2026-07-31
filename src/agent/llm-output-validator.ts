@@ -9,6 +9,7 @@ import { normalizeInterpreterText } from "./deterministic-interpreter.ts";
 import type { AgentConversationAction } from "./conversation.types.ts";
 import type { AgentConversationStep, AgentSession } from "./session.types.ts";
 import type { LlmInterpreterContext, LlmInterpreterPublicProduct } from "./llm-interpreter.types.ts";
+import type { AllowedFactKey, ConversationIntent, ResponseIntent } from "./conversation-intelligence.types.ts";
 
 export const DEFAULT_MAX_OUTPUT_LENGTH = 20_000;
 const MAX_ACTIONS_PER_MESSAGE = 5;
@@ -363,6 +364,98 @@ function validateAction(
   }
 }
 
+// --- planejamento estendido (intent/responseIntent/confidence) --------------
+// Best-effort e sempre opcional: um valor ausente ou malformado nunca rejeita
+// o resultado inteiro (actions[]/reason continuam a única superfície com
+// validação estrita) — apenas o metadado extra é descartado.
+
+const CONVERSATION_INTENT_VALUES: ReadonlySet<string> = new Set([
+  "BUSINESS_ACTION",
+  "SOCIAL",
+  "FACTUAL_QUESTION",
+  "CLARIFICATION_NEEDED",
+  "OBJECTION",
+  "OUT_OF_SCOPE",
+  "REQUEST_HUMAN",
+  "UNRECOGNIZED",
+]);
+
+const ALLOWED_FACT_KEY_VALUES: ReadonlySet<string> = new Set([
+  "PRODUCT",
+  "CART_SUMMARY",
+  "ORDER_CONFIRMATION",
+  "BUSINESS_ADDRESS",
+  "OPERATING_STATUS",
+  "PICKUP_SLOTS",
+  "PAYMENT_OPTIONS",
+  "MISSING_FIELDS",
+  "ORDER_FAILURE_REASON",
+]);
+
+const MAX_AMBIGUITY_REASON_LENGTH = 300;
+const MAX_RESPONSE_INTENT_PRODUCT_IDS = MAX_ACTIONS_PER_MESSAGE;
+
+function extractConversationIntent(raw: unknown): ConversationIntent | undefined {
+  return typeof raw === "string" && CONVERSATION_INTENT_VALUES.has(raw) ? (raw as ConversationIntent) : undefined;
+}
+
+function extractConfidence(raw: unknown): "HIGH" | "LOW" | undefined {
+  return raw === "HIGH" || raw === "LOW" ? raw : undefined;
+}
+
+// Nunca aceita "USE_TEMPLATE" nem qualquer variante fora do enum fechado —
+// essa decisão não existe no vocabulário que o modelo pode produzir
+// (response-strategy-policy.ts é sempre quem decide o canal de saída).
+function extractResponseIntent(raw: unknown): ResponseIntent | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const kind = obj.kind;
+
+  switch (kind) {
+    case "SOCIAL_ACK":
+    case "CONFIRM_ACTION_RESULT":
+    case "ACKNOWLEDGE_OBJECTION":
+    case "DECLINE_OUT_OF_SCOPE":
+    case "REQUEST_HUMAN_ACK":
+      return { kind };
+    case "ANSWER_FACTUAL": {
+      if (!Array.isArray(obj.factKeys)) return undefined;
+      const factKeys = obj.factKeys.filter((k): k is AllowedFactKey => typeof k === "string" && ALLOWED_FACT_KEY_VALUES.has(k));
+      if (factKeys.length === 0) return undefined;
+      return { kind: "ANSWER_FACTUAL", factKeys };
+    }
+    case "ASK_CLARIFICATION": {
+      const reason = obj.ambiguityReason;
+      if (typeof reason !== "string" || !reason.trim() || reason.length > MAX_AMBIGUITY_REASON_LENGTH) return undefined;
+      return { kind: "ASK_CLARIFICATION", ambiguityReason: reason.trim() };
+    }
+    case "OFFER_SUGGESTION": {
+      if (!Array.isArray(obj.productIds)) return undefined;
+      const productIds = obj.productIds.filter((id): id is string => typeof id === "string" && id.length > 0).slice(0, MAX_RESPONSE_INTENT_PRODUCT_IDS);
+      return { kind: "OFFER_SUGGESTION", productIds };
+    }
+    default:
+      return undefined;
+  }
+}
+
+type ExtendedPlanningFields = {
+  intent?: ConversationIntent;
+  responseIntent?: ResponseIntent;
+  confidence?: "HIGH" | "LOW";
+};
+
+function extractExtendedPlanningFields(raw: Record<string, unknown>): ExtendedPlanningFields {
+  const intent = extractConversationIntent(raw.intent);
+  const responseIntent = extractResponseIntent(raw.responseIntent);
+  const confidence = extractConfidence(raw.confidence);
+  return {
+    ...(intent ? { intent } : {}),
+    ...(responseIntent ? { responseIntent } : {}),
+    ...(confidence ? { confidence } : {}),
+  };
+}
+
 // --- validação do lote completo ----------------------------------------------
 
 function extractSuggestions(raw: unknown): string[] | undefined {
@@ -401,9 +494,9 @@ export type ValidateLlmOutputInput = {
 };
 
 export type ValidatedLlmOutput =
-  | { status: "MATCHED"; actions: AgentConversationAction[] }
-  | { status: "NOT_UNDERSTOOD"; reason: string; suggestions?: string[] }
-  | { status: "AMBIGUOUS"; reason: string; candidates?: LlmOutputCandidate[] }
+  | ({ status: "MATCHED"; actions: AgentConversationAction[] } & ExtendedPlanningFields)
+  | ({ status: "NOT_UNDERSTOOD"; reason: string; suggestions?: string[] } & ExtendedPlanningFields)
+  | ({ status: "AMBIGUOUS"; reason: string; candidates?: LlmOutputCandidate[] } & ExtendedPlanningFields)
   | { status: "REJECTED"; reason: string };
 
 export function validateLlmOutput(input: ValidateLlmOutputInput): ValidatedLlmOutput {
@@ -440,7 +533,7 @@ export function validateLlmOutput(input: ValidateLlmOutputInput): ValidatedLlmOu
       return { status: "REJECTED", reason: "CONFIRM_ORDER_MUST_BE_ALONE" };
     }
 
-    return { status: "MATCHED", actions };
+    return { status: "MATCHED", actions, ...extractExtendedPlanningFields(raw) };
   }
 
   if (raw.status === "NOT_UNDERSTOOD") {
@@ -450,14 +543,16 @@ export function validateLlmOutput(input: ValidateLlmOutputInput): ValidatedLlmOu
       return { status: "REJECTED", reason: "ACTIONS_NOT_ALLOWED" };
     }
     const suggestions = extractSuggestions(raw.suggestions);
-    return suggestions ? { status: "NOT_UNDERSTOOD", reason, suggestions } : { status: "NOT_UNDERSTOOD", reason };
+    const extended = extractExtendedPlanningFields(raw);
+    return { status: "NOT_UNDERSTOOD", reason, ...(suggestions ? { suggestions } : {}), ...extended };
   }
 
   if (raw.status === "AMBIGUOUS") {
     const reason = raw.reason;
     if (typeof reason !== "string" || !reason.trim()) return { status: "REJECTED", reason: "REASON_REQUIRED" };
     const candidates = extractCandidates(raw.candidates, session, context);
-    return candidates ? { status: "AMBIGUOUS", reason, candidates } : { status: "AMBIGUOUS", reason };
+    const extended = extractExtendedPlanningFields(raw);
+    return { status: "AMBIGUOUS", reason, ...(candidates ? { candidates } : {}), ...extended };
   }
 
   return { status: "REJECTED", reason: "UNKNOWN_STATUS" };

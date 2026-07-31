@@ -112,8 +112,9 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
         : undefined;
       const text = typeof interpretInput.text === "string" ? interpretInput.text : "";
 
+      const shortHistory = interpretInput.shortHistory ? structuredClone(interpretInput.shortHistory) : undefined;
       const systemPrompt = buildLlmSystemPrompt();
-      const userPrompt = buildLlmUserPrompt({ text, session, context, deterministicResult });
+      const userPrompt = buildLlmUserPrompt({ text, session, context, deterministicResult, shortHistory });
 
       const startedAt = Date.now();
       let raw: unknown;
@@ -152,6 +153,9 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           source: "LLM",
           promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
           durationMs,
+          ...(validated.intent ? { intent: validated.intent } : {}),
+          ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
+          ...(validated.confidence ? { confidence: validated.confidence } : {}),
         };
       }
       if (validated.status === "NOT_UNDERSTOOD") {
@@ -162,6 +166,9 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           source: "LLM",
           promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
           durationMs,
+          ...(validated.intent ? { intent: validated.intent } : {}),
+          ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
+          ...(validated.confidence ? { confidence: validated.confidence } : {}),
         };
       }
       if (validated.status === "AMBIGUOUS") {
@@ -172,6 +179,9 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           source: "LLM",
           promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
           durationMs,
+          ...(validated.intent ? { intent: validated.intent } : {}),
+          ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
+          ...(validated.confidence ? { confidence: validated.confidence } : {}),
         };
       }
       return {
