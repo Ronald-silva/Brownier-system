@@ -48,7 +48,7 @@ function makeStack(
   opts: Partial<CreateTextConversationServiceDependencies> & { domainStore?: AgentDomainStore; sessionStore?: AgentSessionStore } = {},
 ) {
   const domainStore = opts.domainStore ?? makeDomainStore();
-  const tools = createAgentTools({ store: domainStore });
+  const tools = createAgentTools({ store: domainStore, now: opts.now });
   const sessionStore = opts.sessionStore ?? new InMemoryAgentSessionStore();
   const conversationService = createAgentConversationService({ sessionStore, tools });
   const textService = createTextConversationService({
