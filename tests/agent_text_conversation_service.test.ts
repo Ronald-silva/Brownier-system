@@ -1441,7 +1441,7 @@ test("guarda: SHOW_MENU do LLM duas vezes seguidas na mesma sessão vira incompr
   const first = await textService.processText({ channel: CH, contactId, text: "quero 5 prestígio, 5 doce de leite, 10 de ninho, quanto fica?" });
   assert.equal(first.result?.event, "MENU_READY");
 
-  const second = await textService.processText({ channel: CH, contactId, text: "posso pegar agora?" });
+  const second = await textService.processText({ channel: CH, contactId, text: "posso pegar meu pedido?" });
   assert.notEqual(second.result?.event, "MENU_READY");
   assert.equal(second.policyResult?.messageKey, "INTERPRETATION_NOT_UNDERSTOOD");
   assert.equal(second.interpretation?.finalSource, "POLICY");
@@ -1518,7 +1518,7 @@ test("guarda: reproduz a sequência real do incidente (pedido multi-item seguido
     channel: CH,
     contactId,
     messageId: "incident-2",
-    text: "posso pegar agora?",
+    text: "posso pegar meu pedido?",
   });
 
   assert.equal(call, 2);

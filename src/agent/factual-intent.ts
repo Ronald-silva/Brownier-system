@@ -32,7 +32,7 @@ export function resolveFactualIntent(input: {
 }): FactualIntent | undefined {
   const words = tokens(input.text);
   const asksLocation = words.has("endereco") || words.has("localizacao") || words.has("onde") || words.has("local");
-  const pickupContext = words.has("retirada") || words.has("retirar") || words.has("coleta") || words.has("coletar") || words.has("buscar") || words.has("loja") || words.has("fica") || words.has("ficam");
+  const pickupContext = words.has("retirada") || words.has("retirar") || words.has("coleta") || words.has("coletar") || words.has("buscar") || words.has("pegar") || words.has("loja") || words.has("fica") || words.has("ficam");
   // No canal da loja, uma pergunta explícita pelo endereço já se refere ao
   // endereço comercial; os demais termos desambiguam "onde/local".
   if (words.has("endereco") || words.has("localizacao") || (asksLocation && pickupContext)) {
