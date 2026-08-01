@@ -242,10 +242,13 @@ test("MATCHED com misunderstandingCount já zero não gera update de sessão des
   const { textService } = makeStack({ sessionStore: store });
   const contactId = "matched-no-extra-update";
   await textService.processText({ channel: CH, contactId, text: "oi" });
-  // Uma única chamada a update(): a persistência do Engine feita pelo
-  // Conversation Service. Nenhuma chamada extra da política, pois o
-  // contador já estava em zero.
-  assert.equal(state.calls, 1);
+  // Duas chamadas a update(): a persistência do Engine feita pelo
+  // Conversation Service, mais a gravação de lastMessageKey feita por
+  // recordLastMessageKey (guarda de repetição de SHOW_MENU/MENU_READY —
+  // ver docs/audits/2026-08-01-show-menu-repetido.md). Nenhuma chamada
+  // extra da política de misunderstandingCount, pois o contador já estava
+  // em zero.
+  assert.equal(state.calls, 2);
 });
 
 // Uma ação recusada pelo Engine (qualquer messageKey de FAILURE_MESSAGE_KEYS,
@@ -1399,4 +1402,193 @@ test("fluxo completo: LLM adiciona itens, restante segue determinístico, pedido
   assert.equal(confirmResult.result?.event, "ORDER_CREATED");
   const replay = await confirmService.processText({ channel: CH, contactId, messageId: "confirm-final", text: "confirmar" });
   assert.equal(replay.duplicateMessage, true);
+});
+
+// --- guarda de repetição: SHOW_MENU do LLM duas vezes seguidas -------------
+// Mitigação estrutural (não a causa raiz — ver docs/audits/) para o
+// incidente real em que a NVIDIA devolveu SHOW_MENU duas vezes seguidas para
+// um cliente que não pediu o cardápio, sem nunca processar o pedido. Se a
+// última mensagem enviada nesta sessão já foi MENU_READY e o LLM decide
+// SHOW_MENU de novo sem progresso algum (mesmo step, sem mudança de itens),
+// o turno vira incompreensão (mesmo caminho de esclarecimento/handoff já
+// usado para NOT_UNDERSTOOD) em vez de reenviar o cardápio idêntico. Só se
+// aplica à ação decidida pelo LLM — SHOW_MENU determinístico continua igual.
+
+test("guarda: SHOW_MENU do LLM uma única vez (sem MENU_READY anterior) executa normalmente", async () => {
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
+  });
+  const contactId = "guard-show-menu-once";
+  const result = await textService.processText({ channel: CH, contactId, text: "preciso de ajuda para escolher" });
+
+  assert.equal(result.result?.event, "MENU_READY");
+  assert.equal(result.interpretation?.finalSource, "LLM");
+  assert.equal(result.policy.misunderstandingCountAfter, 0);
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.lastMessageKey, "MENU_READY");
+});
+
+test("guarda: SHOW_MENU do LLM duas vezes seguidas na mesma sessão vira incompreensão na segunda, não reenvia o cardápio", async () => {
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
+  });
+  const contactId = "guard-show-menu-twice";
+
+  const first = await textService.processText({ channel: CH, contactId, text: "quero 5 prestígio, 5 doce de leite, 10 de ninho, quanto fica?" });
+  assert.equal(first.result?.event, "MENU_READY");
+
+  const second = await textService.processText({ channel: CH, contactId, text: "posso pegar agora?" });
+  assert.notEqual(second.result?.event, "MENU_READY");
+  assert.equal(second.policyResult?.messageKey, "INTERPRETATION_NOT_UNDERSTOOD");
+  assert.equal(second.interpretation?.finalSource, "POLICY");
+  assert.equal(second.policy.misunderstandingCountBefore, 0);
+  assert.equal(second.policy.misunderstandingCountAfter, 1);
+  assert.equal(second.policy.handoffTriggered, false);
+
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  const sessionAfter = sessionStore.get(sessionKey);
+  assert.equal(sessionAfter?.step, "BROWSING_MENU");
+  assert.equal(sessionAfter?.items.length, 0);
+});
+
+test("guarda: pedir cardápio explicitamente duas vezes via determinístico não é afetado pela guarda", async () => {
+  // Texto sem palavra-chave de resolveFactualIntent ("menu"/"cardapio"/
+  // "sabores"/"preco"/"precos") para exercitar o caminho MATCHED puro do
+  // interpretador determinístico (finalSource "DETERMINISTIC"), não o atalho
+  // factual — ambos são caminhos não-LLM que a guarda (Parte B) não toca.
+  const { textService, sessionStore } = makeStack({
+    interpretMessage: () => ({ status: "MATCHED", action: { type: "SHOW_MENU" }, confidence: 1, source: "T", normalizedText: "mostra as opções" }),
+  });
+  const contactId = "guard-deterministic-menu-twice";
+
+  const first = await textService.processText({ channel: CH, contactId, text: "mostra as opções" });
+  assert.equal(first.result?.event, "MENU_READY");
+  assert.equal(first.interpretation?.finalSource, "DETERMINISTIC");
+
+  const second = await textService.processText({ channel: CH, contactId, text: "mostra as opções" });
+  assert.equal(second.result?.event, "MENU_READY");
+  assert.equal(second.interpretation?.finalSource, "DETERMINISTIC");
+
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.lastMessageKey, "MENU_READY");
+});
+
+test("guarda: pedir cardápio via palavra-chave factual duas vezes seguidas também não é afetado pela guarda", async () => {
+  // "cardápio" é reconhecido por resolveFactualIntent antes mesmo do
+  // interpretador determinístico — outro caminho não-LLM (finalSource
+  // "POLICY") que a guarda (Parte B) também não deve tocar.
+  const { textService, sessionStore } = makeStack();
+  const contactId = "guard-factual-menu-twice";
+
+  const first = await textService.processText({ channel: CH, contactId, text: "cardápio" });
+  assert.equal(first.result?.event, "MENU_READY");
+  assert.equal(first.interpretation?.finalSource, "POLICY");
+
+  const second = await textService.processText({ channel: CH, contactId, text: "cardápio" });
+  assert.equal(second.result?.event, "MENU_READY");
+  assert.equal(second.interpretation?.finalSource, "POLICY");
+
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.lastMessageKey, "MENU_READY");
+});
+
+test("guarda: reproduz a sequência real do incidente (pedido multi-item seguido de pergunta sobre retirada) — a segunda não vira MENU_READY de novo", async () => {
+  let call = 0;
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => {
+      call += 1;
+      return llmMatched([{ type: "SHOW_MENU" }]);
+    },
+  });
+  const contactId = "guard-incident-replay";
+
+  const first = await textService.processText({
+    channel: CH,
+    contactId,
+    messageId: "incident-1",
+    text: "quero 5 prestígio, 5 doce de leite, 10 de ninho, quanto fica?",
+  });
+  const second = await textService.processText({
+    channel: CH,
+    contactId,
+    messageId: "incident-2",
+    text: "posso pegar agora?",
+  });
+
+  assert.equal(call, 2);
+  assert.equal(first.result?.event, "MENU_READY");
+  assert.notEqual(second.result?.event, "MENU_READY");
+  assert.equal(second.policyResult?.messageKey, "INTERPRETATION_NOT_UNDERSTOOD");
+  // O carrinho continua vazio nos dois casos (nenhum item foi processado),
+  // exatamente o sintoma do incidente real — mas agora o cliente recebe um
+  // pedido de esclarecimento em vez do cardápio repetido.
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.items.length, 0);
+});
+
+// --- guarda de repetição: falso positivo em pedido explícito de "de novo" --
+// Correção do falso positivo relatado após a Parte B original: a guarda
+// disparava sempre que a última mensagem enviada já era MENU_READY e o LLM
+// decidia SHOW_MENU de novo, mesmo quando o cliente pedia explicitamente
+// para ver o cardápio outra vez (ex.: "esqueci um sabor, mostra de novo").
+// Rastrear só a origem da mensagem anterior (LLM vs. determinístico/factual)
+// não resolve isso — nos dois casos abaixo a mensagem anterior TAMBÉM veio
+// do LLM; o que distingue um do outro é o conteúdo da mensagem atual.
+
+test("guarda: cliente pede explicitamente para ver o cardápio de novo após MENU_READY via LLM não é bloqueado", async () => {
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
+  });
+  const contactId = "guard-explicit-repeat-request";
+
+  // Primeira exibição legítima, via LLM (texto sem "cardápio"/"menu"/
+  // "sabores"/"preço" para não passar pelo atalho factual antes do LLM).
+  const first = await textService.processText({ channel: CH, contactId, text: "o que voces tem pra vender hoje?" });
+  assert.equal(first.result?.event, "MENU_READY");
+  assert.equal(first.interpretation?.finalSource, "LLM");
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.lastMessageKey, "MENU_READY");
+
+  // Pedido explícito de repetição, também via LLM — não deve cair na guarda
+  // mesmo com lastMessageKey já MENU_READY e step BROWSING_MENU.
+  const second = await textService.processText({ channel: CH, contactId, text: "pode mostrar de novo, esqueci um sabor" });
+  assert.equal(second.result?.event, "MENU_READY");
+  assert.equal(second.interpretation?.finalSource, "LLM");
+  assert.equal(second.policyResult, undefined);
+  assert.equal(second.policy.misunderstandingCountBefore, 0);
+  assert.equal(second.policy.misunderstandingCountAfter, 0);
+  assert.equal(second.policy.handoffTriggered, false);
+  assert.equal(sessionStore.get(sessionKey)?.lastMessageKey, "MENU_READY");
+});
+
+test("guarda: repetição suspeita do LLM sem nenhum indício de pedido continua caindo na guarda (padrão real do incidente)", async () => {
+  // Mesma forma do teste acima (duas decisões SHOW_MENU do LLM seguidas),
+  // mas sem nenhuma palavra de MENU_REQUEST_CUE_WORDS na segunda mensagem —
+  // deve continuar caindo na guarda, exatamente como antes da correção.
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }]),
+  });
+  const contactId = "guard-still-blocks-unprompted-repeat";
+
+  const first = await textService.processText({ channel: CH, contactId, text: "o que voces tem pra vender hoje?" });
+  assert.equal(first.result?.event, "MENU_READY");
+
+  const second = await textService.processText({ channel: CH, contactId, text: "quanto custa o pedido todo?" });
+  assert.notEqual(second.result?.event, "MENU_READY");
+  assert.equal(second.policyResult?.messageKey, "INTERPRETATION_NOT_UNDERSTOOD");
+  assert.equal(second.interpretation?.finalSource, "POLICY");
+  assert.equal(second.policy.misunderstandingCountAfter, 1);
+
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.step, "BROWSING_MENU");
 });

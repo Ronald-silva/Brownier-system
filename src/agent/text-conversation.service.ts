@@ -15,6 +15,7 @@ import type { AgentConversationAction, AgentConversationResult } from "./convers
 import type { AgentConversationService } from "./conversation.service.ts";
 import {
   interpretDeterministicMessage,
+  normalizeInterpreterText,
 } from "./deterministic-interpreter.ts";
 import type {
   DeterministicInterpretationResult,
@@ -399,6 +400,27 @@ function applySingleAction(params: {
   return { engineResult, sessionAfter, counterReset };
 }
 
+// Grava o messageKey da última mensagem efetivamente enviada ao cliente
+// nesta sessão (AgentSession.lastMessageKey) — hoje só consumido pela
+// guarda de repetição de SHOW_MENU/MENU_READY (ver processText), mas
+// deliberadamente genérico: reflete a última mensagem de qualquer turno,
+// não só SHOW_MENU. Roda sempre como a última operação de sessão do turno,
+// ainda dentro do lock (withSessionLock), para nunca sobrescrever com um
+// valor desatualizado o resultado de um turno concorrente mais recente.
+// Sem mensagem nova de fato enviada (duplicata deduplicada, messages
+// vazio) não há o que gravar.
+function recordLastMessageKey(
+  sessionStore: AgentSessionStore,
+  sessionKey: string,
+  result: ProcessTextResult,
+): ProcessTextResult {
+  if (result.duplicateMessage || result.messages.length === 0) return result;
+  const messageKey = result.result?.messageKey ?? result.policyResult?.messageKey;
+  if (!messageKey || result.sessionAfter.lastMessageKey === messageKey) return result;
+  const updated = sessionStore.update(sessionKey, current => ({ ...current, lastMessageKey: messageKey }));
+  return { ...result, sessionAfter: structuredClone(updated) };
+}
+
 // Traduz o OperatingStatus já calculado (relógio real, America/Fortaleza) no
 // messageKey/dados certos — nunca o inverso: o texto nunca decide o estado,
 // só o exibe. Cobre os quatro casos pedidos (aberto, fechado hoje, fechado
@@ -426,6 +448,22 @@ function pickupAvailabilityPolicyResult(status: OperatingStatus): TextConversati
 
 function llmRecoveryKind(session: AgentSession): "START" | "ORDER" {
   return session.step === "START" || session.step === "BROWSING_MENU" ? "START" : "ORDER";
+}
+
+// Palavras que indicam um pedido explícito de ver o cardápio/opções — usadas
+// só como exceção à guarda de repetição de SHOW_MENU (ver mais abaixo). Não
+// tenta ser uma lista exaustiva de todo jeito de pedir isso: um falso
+// negativo aqui (frase que pede de novo sem usar nenhuma destas palavras) só
+// custa um turno extra de esclarecimento, o mesmo fallback que já existe
+// para qualquer mensagem não compreendida. "cardapio"/"menu"/"sabores" já são
+// interceptadas antes mesmo de chegar aqui por resolveFactualIntent — ficam
+// na lista só para cobrir o caso raro em que outra palavra-chave factual
+// (ex.: pergunta de horário) tem precedência sobre elas na mesma mensagem.
+const MENU_REQUEST_CUE_WORDS = new Set(["cardapio", "menu", "sabores", "opcoes", "novo", "novamente"]);
+
+function mentionsMenuRequestCue(text: string): boolean {
+  const words = normalizeInterpreterText(text).split(" ").filter(Boolean);
+  return words.some(word => MENU_REQUEST_CUE_WORDS.has(word));
 }
 
 const DEFAULT_CONFIRM_RESPONSE_INTENT: ResponseIntent = { kind: "CONFIRM_ACTION_RESULT" };
@@ -610,6 +648,7 @@ export function createTextConversationService(
       const sessionKey = buildAgentSessionKey(channel, contactId);
 
       return withSessionLock(sessionKey, async () => {
+      const turnResult = await (async (): Promise<ProcessTextResult> => {
       const sessionBeforeRaw = sessionStore.getOrCreate({ channel, contactId });
       const sessionBefore = structuredClone(sessionBeforeRaw);
       const misunderstandingCountBefore = sessionBefore.misunderstandingCount;
@@ -725,6 +764,48 @@ export function createTextConversationService(
             ...(shortHistoryEnabled ? { shortHistory: appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString(), ...(messageId ? { messageId } : {}) }) } : {}),
           });
         }
+      }
+
+      // Guarda de repetição (mitigação estrutural, não a causa raiz — ver
+      // docs/audits/2026-08-01-show-menu-repetido.md): se o planejamento do
+      // LLM decidiu SHOW_MENU de novo, mas a última mensagem já enviada
+      // nesta sessão foi MENU_READY e nada progrediu desde então (step ainda
+      // BROWSING_MENU/BUILDING_ORDER — não STARTING, o que indicaria que o
+      // cardápio nunca tinha sido mostrado de fato), reenviar o mesmo
+      // cardápio de novo É suspeito — mas só quando a mensagem atual não
+      // contém nenhum indício de pedido explícito (mentionsMenuRequestCue).
+      // Sem essa checagem de conteúdo, um "pode mostrar de novo, esqueci um
+      // sabor" legítimo cairia na guarda tão facilmente quanto uma repetição
+      // silenciosa: as duas produzem exatamente o mesmo estado de sessão
+      // (lastMessageKey=MENU_READY, step BROWSING_MENU/BUILDING_ORDER, ação
+      // LLM MATCHED SHOW_MENU) — rastrear só a origem (LLM vs.
+      // determinístico/factual) da mensagem anterior não resolve isso, pois
+      // no caso legítimo a mensagem anterior TAMBÉM veio do LLM. Rastrear a
+      // origem sozinha ainda enfraqueceria a guarda no padrão mais provável
+      // do incidente real (primeira exibição via atalho factual "cardápio",
+      // reincidências via LLM não pedidas): exigir origem LLM na mensagem
+      // anterior deixaria essas reincidências passarem. Por isso a decisão
+      // aqui é conteúdo da mensagem atual, não origem da anterior. Reduz o
+      // llmOutcome a NOT_UNDERSTOOD para cair no caminho de esclarecimento/
+      // handoff por incompreensão já existente (mais abaixo), em vez de
+      // reexecutar SHOW_MENU. Só se aplica à ação vinda do LLM: SHOW_MENU
+      // determinístico (factual ou do interpretador determinístico) não
+      // passa por aqui e continua funcionando igual.
+      if (
+        llmOutcome?.status === "MATCHED" &&
+        llmOutcome.actions.length === 1 &&
+        llmOutcome.actions[0]!.type === "SHOW_MENU" &&
+        sessionBefore.lastMessageKey === "MENU_READY" &&
+        (sessionBefore.step === "BROWSING_MENU" || sessionBefore.step === "BUILDING_ORDER") &&
+        !mentionsMenuRequestCue(text)
+      ) {
+        llmOutcome = {
+          status: "NOT_UNDERSTOOD",
+          reason: "REPEATED_MENU_GUARD",
+          source: "LLM",
+          promptVersion: llmOutcome.promptVersion,
+          durationMs: llmOutcome.durationMs,
+        };
       }
 
       if (llmOutcome?.status === "PROVIDER_ERROR") {
@@ -1114,6 +1195,8 @@ export function createTextConversationService(
             }
           : {}),
       };
+      })();
+      return recordLastMessageKey(sessionStore, sessionKey, turnResult);
       });
     },
   };

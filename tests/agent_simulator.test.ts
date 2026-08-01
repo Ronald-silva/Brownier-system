@@ -1292,3 +1292,108 @@ test("OPENAI_FALLBACK: a saída do Text Conversation Service nunca revela OPENAI
   assert.ok(!serialized.includes("systemPrompt"));
   assert.ok(!serialized.includes("userPrompt"));
 });
+
+// --- verbalização (BF_VERBALIZATION_MODE) -----------------------------------
+// resolveLlmRuntime já resolve verbalizationMode/llmVerbalizer a partir do
+// mesmo env (readLlmRuntimeConfig lê BF_VERBALIZATION_MODE junto com
+// BF_LLM_MODE) — createSimulatorRuntime só precisava repassar isso ao Text
+// Conversation Service, exatamente como whatsapp-conversation.runtime.ts já
+// fazia. Estes testes cobrem esse wiring (o gap que existia no simulador),
+// não o parsing do env nem o provider em si (já cobertos em outros arquivos).
+
+const VERBALIZATION_ENABLED_ENV = { ...NVIDIA_ENV, BF_VERBALIZATION_MODE: "ENABLED" };
+
+// Fila de respostas do cliente NVIDIA fake: a primeira chamada é sempre o
+// planejamento (chamada #1); a segunda (só existe quando a Response Strategy
+// Policy decide VERBALIZE) é a chamada de verbalização (#2) — mesma ordem
+// determinística que o Text Conversation Service usa em produção.
+class QueuedFakeNvidiaClient implements NvidiaCompatibleClient {
+  calls: Record<string, unknown>[] = [];
+  chat: { completions: { create(params: Record<string, unknown>): Promise<{ choices?: Array<{ message?: { content?: string | null } }> }> } };
+
+  constructor(outputs: string[]) {
+    const queue = [...outputs];
+    this.chat = {
+      completions: {
+        create: async (params: Record<string, unknown>) => {
+          this.calls.push(params);
+          const content = queue.shift() ?? '{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}';
+          return { choices: [{ message: { content } }] };
+        },
+      },
+    };
+  }
+}
+
+test("BF_VERBALIZATION_MODE ausente: nenhuma chamada de verbalização é feita — comportamento idêntico ao anterior a esta mudança", async () => {
+  const nvidiaClient = new QueuedFakeNvidiaClient([
+    '{"status":"NOT_UNDERSTOOD","reason":"GENERIC","suggestions":[],"intent":"OBJECTION"}',
+  ]);
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: NVIDIA_ENV, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-verbal-off", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-verbal-off",
+    text: "nossa, achei bem caro isso tudo",
+  });
+  // Só a chamada de planejamento aconteceu — nenhuma segunda chamada (que
+  // seria a de verbalização) foi feita ao cliente NVIDIA fake.
+  assert.equal(nvidiaClient.calls.length, 1);
+  assert.equal(result.policyResult?.messageKey, "OBJECTION_ACKNOWLEDGED");
+  assert.equal(result.messages[0]?.metadata?.verbalized, undefined);
+});
+
+test("BF_VERBALIZATION_MODE=DISABLED explícito: mesmo comportamento de ausente, nenhuma chamada de verbalização", async () => {
+  const nvidiaClient = new QueuedFakeNvidiaClient([
+    '{"status":"NOT_UNDERSTOOD","reason":"GENERIC","suggestions":[],"intent":"OBJECTION"}',
+  ]);
+  const runtime = createSimulatorRuntime({
+    domainStore: buildSeedDomainStore(),
+    env: { ...NVIDIA_ENV, BF_VERBALIZATION_MODE: "DISABLED" },
+    nvidiaClient,
+  });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-verbal-explicit-off", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-verbal-explicit-off",
+    text: "nossa, achei bem caro isso tudo",
+  });
+  assert.equal(nvidiaClient.calls.length, 1);
+  assert.equal(result.messages[0]?.metadata?.verbalized, undefined);
+});
+
+test("BF_VERBALIZATION_MODE=ENABLED: uma objeção reconhecida pelo planejamento é verbalizada de verdade pelo simulador", async () => {
+  const fakeVerbalizedText = "Entendo a preocupação com o valor! Se quiser, posso te mostrar as opções que cabem melhor no seu bolso.";
+  const nvidiaClient = new QueuedFakeNvidiaClient([
+    '{"status":"NOT_UNDERSTOOD","reason":"GENERIC","suggestions":[],"intent":"OBJECTION"}',
+    JSON.stringify({ responseText: fakeVerbalizedText, usedFactIds: [] }),
+  ]);
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: VERBALIZATION_ENABLED_ENV, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-verbal-on", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-verbal-on",
+    text: "nossa, achei bem caro isso tudo",
+  });
+  // Planejamento + verbalização: as duas chamadas NVIDIA aconteceram, nessa ordem.
+  assert.equal(nvidiaClient.calls.length, 2);
+  assert.equal(result.messages[0]?.text, fakeVerbalizedText);
+  assert.equal(result.messages[0]?.metadata?.verbalized, true);
+});
+
+test("BF_VERBALIZATION_MODE=ENABLED: falha do provider de verbalização cai de volta para o template, sem quebrar o turno", async () => {
+  const nvidiaClient = new QueuedFakeNvidiaClient([
+    '{"status":"NOT_UNDERSTOOD","reason":"GENERIC","suggestions":[],"intent":"OBJECTION"}',
+    "isto não é JSON válido",
+  ]);
+  const runtime = createSimulatorRuntime({ domainStore: buildSeedDomainStore(), env: VERBALIZATION_ENABLED_ENV, nvidiaClient });
+  await runtime.textService.processText({ channel: "simulator", contactId: "c-verbal-fallback", text: "oi" });
+  const result = await runtime.textService.processText({
+    channel: "simulator",
+    contactId: "c-verbal-fallback",
+    text: "nossa, achei bem caro isso tudo",
+  });
+  assert.equal(nvidiaClient.calls.length, 2);
+  assert.equal(result.policyResult?.messageKey, "OBJECTION_ACKNOWLEDGED");
+  assert.equal(result.messages[0]?.metadata?.verbalized, undefined);
+});

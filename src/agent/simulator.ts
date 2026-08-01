@@ -233,6 +233,11 @@ export function createSimulatorRuntime(options: SimulatorRuntimeOptions): Simula
     llmRuntime.llmMode === "DISABLED"
       ? "DISABLED"
       : "FALLBACK";
+  // Mesmo padrão de whatsapp-conversation.runtime.ts: verbalização só existe
+  // quando o provider resolvido é NVIDIA_NEMOTRON e BF_VERBALIZATION_MODE=ENABLED
+  // (lido por resolveLlmRuntime/readLlmRuntimeConfig a partir do mesmo env).
+  const verbalizationMode = llmRuntime.llmMode === "NVIDIA_NEMOTRON" ? llmRuntime.verbalizationMode : "DISABLED";
+  const llmVerbalizer = llmRuntime.llmMode === "NVIDIA_NEMOTRON" ? llmRuntime.llmVerbalizer : undefined;
 
   // O Text Conversation Service não conhece providers: todo runtime ativo
   // recebe seu interpreter já criado e usa o modo interno FALLBACK.
@@ -251,6 +256,8 @@ export function createSimulatorRuntime(options: SimulatorRuntimeOptions): Simula
         maxMisunderstandings: options.maxMisunderstandings,
         llmMode: textConversationLlmMode,
         llmInterpreter: llmRuntime.llmInterpreter,
+        verbalizationMode,
+        ...(llmVerbalizer === undefined ? {} : { verbalizeWithLlm: (request) => llmVerbalizer!.verbalize(request) }),
       });
   return { tools, sessionStore, conversationService, textService };
 }

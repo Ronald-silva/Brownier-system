@@ -58,4 +58,11 @@ export type AgentSession = {
   // Opcional por compatibilidade: sessões persistidas antes desta mudança
   // não têm o campo. Sempre tratado como [] quando ausente.
   shortHistory?: AgentShortHistoryEntry[];
+  // messageKey da última mensagem efetivamente enviada ao cliente nesta
+  // sessão (ver text-conversation.service.ts: recordLastMessageKey). Usado
+  // apenas como guarda de repetição não intencional (ex.: SHOW_MENU do LLM
+  // duas vezes seguidas sem progresso) — nunca como fonte de fato de negócio.
+  // Opcional por compatibilidade: sessões antigas sem o campo são tratadas
+  // como se nenhuma mensagem tivesse sido enviada ainda.
+  lastMessageKey?: string;
 };

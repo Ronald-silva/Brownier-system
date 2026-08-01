@@ -390,3 +390,89 @@ test("no tool, order, or external API is called by the LLM interpreter itself", 
   assert.ok(!("createdOrderId" in result));
   assert.ok(!("publicCode" in result));
 });
+
+// --- logging temporário de causa raiz (Parte A, ver docs/audits/) ----------
+// Cobre só o comportamento observável do logging: dispara exclusivamente
+// quando a ação MATCHED é SHOW_MENU, nunca inclui texto do cliente/contactId,
+// e não altera o resultado devolvido. Não grava em arquivo real — intercepta
+// console.warn na memória do processo de teste e restaura no fim.
+
+function withConsoleWarnSpy(run: (calls: unknown[][]) => Promise<void>): Promise<void> {
+  const original = console.warn;
+  const calls: unknown[][] = [];
+  console.warn = (...args: unknown[]) => {
+    calls.push(args);
+  };
+  return run(calls).finally(() => {
+    console.warn = original;
+  });
+}
+
+test("MATCHED com SHOW_MENU dispara o log temporário, sem PII e sem alterar o resultado", async () => {
+  await withConsoleWarnSpy(async calls => {
+    const provider = fixedProvider({
+      status: "MATCHED",
+      actions: [{ type: "SHOW_MENU" }],
+      intent: "BUSINESS_ACTION",
+      confidence: "LOW",
+    });
+    const interpreter = createLlmInterpreter({ provider });
+    const result = await interpreter.interpret({
+      text: "quero 5 prestígio, 5 doce de leite, 10 de ninho, quanto fica?",
+      session: atStep("BROWSING_MENU"),
+      context: PRODUCTS_CONTEXT,
+    });
+
+    assert.equal(result.status, "MATCHED");
+    if (result.status === "MATCHED") {
+      assert.deepEqual(result.actions, [{ type: "SHOW_MENU" }]);
+    }
+
+    assert.equal(calls.length, 1);
+    const [logged] = calls[0]!;
+    assert.equal(typeof logged, "string");
+    const parsed = JSON.parse(logged as string);
+    assert.equal(parsed.tag, "llm_interpreter_show_menu_matched");
+    assert.equal(parsed.status, "MATCHED");
+    assert.deepEqual(parsed.actionTypes, ["SHOW_MENU"]);
+    assert.equal(parsed.intent, "BUSINESS_ACTION");
+    assert.equal(parsed.confidence, "LOW");
+    const serialized = JSON.stringify(parsed);
+    assert.ok(!serialized.includes("prestígio"));
+    assert.ok(!serialized.includes("c1"));
+  });
+});
+
+test("MATCHED sem SHOW_MENU não dispara o log temporário", async () => {
+  await withConsoleWarnSpy(async calls => {
+    const provider = fixedProvider({
+      status: "MATCHED",
+      actions: [{ type: "ADD_ITEM", productId: "p1", quantity: 2 }],
+    });
+    const interpreter = createLlmInterpreter({ provider });
+    await interpreter.interpret({
+      text: "quero dois tradicionais",
+      session: atStep("BUILDING_ORDER"),
+      context: PRODUCTS_CONTEXT,
+    });
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("NOT_UNDERSTOOD e AMBIGUOUS não disparam o log temporário (só MATCHED com SHOW_MENU)", async () => {
+  await withConsoleWarnSpy(async calls => {
+    const notUnderstood = fixedProvider({ status: "NOT_UNDERSTOOD", reason: "GENERIC" });
+    const interpreter1 = createLlmInterpreter({ provider: notUnderstood });
+    await interpreter1.interpret({ text: "oi", session: atStep("START") });
+
+    const ambiguous = fixedProvider({
+      status: "AMBIGUOUS",
+      reason: "MULTIPLE_MATCHES",
+      candidates: [{ type: "ADD_ITEM", productId: "p1", quantity: 1 }],
+    });
+    const interpreter2 = createLlmInterpreter({ provider: ambiguous });
+    await interpreter2.interpret({ text: "quero um", session: atStep("BUILDING_ORDER"), context: PRODUCTS_CONTEXT });
+
+    assert.equal(calls.length, 0);
+  });
+});

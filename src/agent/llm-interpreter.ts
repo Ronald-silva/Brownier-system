@@ -85,6 +85,19 @@ function extractSafeProviderError(error: unknown): SafeProviderError {
   }
 }
 
+// TEMPORÁRIO — ver comentário no ponto de chamada (createLlmInterpreter,
+// branch MATCHED). Não há módulo de observabilidade estruturada neste
+// projeto ainda; console.warn em JSON é o mecanismo mais simples que o
+// Railway já captura, sem introduzir uma dependência nova só para isto.
+function logShowMenuMatch(input: {
+  status: "MATCHED";
+  actionTypes: string[];
+  intent?: string;
+  confidence?: "HIGH" | "LOW";
+}): void {
+  console.warn(JSON.stringify({ tag: "llm_interpreter_show_menu_matched", ...input }));
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_resolve, reject) => {
@@ -147,6 +160,22 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
       const validated = validateLlmOutput({ raw, session, context, maxOutputLength });
 
       if (validated.status === "MATCHED") {
+        // TEMPORÁRIO — logging de causa raiz para o incidente de SHOW_MENU
+        // repetido (ver docs/audits/2026-08-01-show-menu-repetido.md).
+        // Dispara só quando a ação decidida é SHOW_MENU, para não virar
+        // ruído nem ampliar a superfície de exposição além do necessário.
+        // Nunca inclui texto do cliente, contactId ou qualquer PII — apenas
+        // metadados já classificados pelo validator. Remover ou promover a
+        // observabilidade permanente assim que o padrão estiver confirmado
+        // com dados reais.
+        if (validated.actions.some(action => action.type === "SHOW_MENU")) {
+          logShowMenuMatch({
+            status: validated.status,
+            actionTypes: validated.actions.map(action => action.type),
+            ...(validated.intent ? { intent: validated.intent } : {}),
+            ...(validated.confidence ? { confidence: validated.confidence } : {}),
+          });
+        }
         return {
           status: "MATCHED",
           actions: validated.actions,
