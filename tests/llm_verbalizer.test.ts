@@ -95,3 +95,85 @@ test("o prompt de usuário nunca vaza a mensagem do cliente como instrução for
   const end = userPrompt.indexOf("</user_message>");
   assert.ok(start !== -1 && end !== -1 && start < end);
 });
+
+// --- logging permanente de latência (verbalização = chamada NVIDIA #2) -----
+// BF_VERBALIZATION_MODE segue DISABLED em produção hoje, então esta chamada
+// nunca dispara de verdade ainda — mas o log já é permanente e testado aqui,
+// preparado para quando for ligada. Uma linha console.log por chamada,
+// nunca com responseText/usedFactIds/mensagem do cliente.
+
+function withConsoleLogSpy(run: (calls: unknown[][]) => Promise<void>): Promise<void> {
+  const original = console.log;
+  const calls: unknown[][] = [];
+  console.log = (...args: unknown[]) => {
+    calls.push(args);
+  };
+  return run(calls).finally(() => {
+    console.log = original;
+  });
+}
+
+test("toda chamada ao provider gera exatamente uma linha llm_verbalization_call", async () => {
+  await withConsoleLogSpy(async calls => {
+    const provider = new FakeVerbalizerProvider({ responseText: "Custa R$ 5,00!", usedFactIds: ["product:p1"] });
+    const verbalizer = createLlmVerbalizer({ provider });
+    await verbalizer.verbalize(request());
+
+    assert.equal(calls.length, 1);
+    const [logged] = calls[0]!;
+    assert.equal(typeof logged, "string");
+    const parsed = JSON.parse(logged as string);
+    assert.equal(parsed.event, "llm_verbalization_call");
+    assert.equal(parsed.status, "VERBALIZED");
+    assert.equal(typeof parsed.durationMs, "number");
+    assert.ok(parsed.durationMs >= 0);
+    assert.equal(typeof parsed.timestamp, "string");
+    assert.ok(!Number.isNaN(Date.parse(parsed.timestamp)));
+    assert.ok(!("reason" in parsed));
+
+    const serialized = JSON.stringify(parsed);
+    assert.ok(!serialized.includes("Custa R$ 5,00"));
+    assert.ok(!serialized.includes("product:p1"));
+  });
+});
+
+test("log dispara em REJECTED e PROVIDER_ERROR, com reason presente e nunca com a mensagem do cliente", async () => {
+  await withConsoleLogSpy(async calls => {
+    const rejected = new FakeVerbalizerProvider("isso não é json");
+    await createLlmVerbalizer({ provider: rejected }).verbalize(
+      request({ currentCustomerMessage: "telefone 5511999999999, endereço secreto" }),
+    );
+
+    const providerErrorProvider = new FakeVerbalizerProvider(
+      Object.assign(new Error("boom"), { code: "NVIDIA_TIMEOUT", retryable: true }),
+    );
+    await createLlmVerbalizer({ provider: providerErrorProvider }).verbalize(request());
+
+    assert.equal(calls.length, 2);
+    const [rejectedEntry, providerErrorEntry] = calls.map(call => JSON.parse(call[0] as string));
+
+    assert.equal(rejectedEntry.event, "llm_verbalization_call");
+    assert.equal(rejectedEntry.status, "REJECTED");
+    assert.equal(typeof rejectedEntry.reason, "string");
+
+    assert.equal(providerErrorEntry.status, "PROVIDER_ERROR");
+    assert.equal(providerErrorEntry.reason, "NVIDIA_TIMEOUT");
+
+    const serialized = calls.map(call => call[0]).join("\n");
+    assert.ok(!serialized.includes("5511999999999"));
+    assert.ok(!serialized.includes("endereço secreto"));
+  });
+});
+
+test("o logging permanente não altera o resultado devolvido por verbalize()", async () => {
+  await withConsoleLogSpy(async () => {
+    const provider = new FakeVerbalizerProvider({ responseText: "Custa R$ 5,00!", usedFactIds: ["product:p1"] });
+    const verbalizer = createLlmVerbalizer({ provider });
+    const result = await verbalizer.verbalize(request());
+    assert.equal(result.status, "VERBALIZED");
+    if (result.status === "VERBALIZED") {
+      assert.equal(result.text, "Custa R$ 5,00!");
+      assert.deepEqual(result.usedFactIds, ["product:p1"]);
+    }
+  });
+});

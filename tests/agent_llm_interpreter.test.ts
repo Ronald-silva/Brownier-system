@@ -476,3 +476,105 @@ test("NOT_UNDERSTOOD e AMBIGUOUS não disparam o log temporário (só MATCHED co
     assert.equal(calls.length, 0);
   });
 });
+
+// --- logging permanente de latência (planejamento = chamada NVIDIA #1) -----
+// Diferente do log temporário acima (só SHOW_MENU, via console.warn), este
+// dispara sempre, via console.log, para permitir calcular p50/p95 reais a
+// partir dos logs do Railway. Cobre só o comportamento observável: formato
+// do JSON, ausência de PII, e que o resultado devolvido por interpret() não
+// muda por causa do logging.
+
+function withConsoleLogSpy(run: (calls: unknown[][]) => Promise<void>): Promise<void> {
+  const original = console.log;
+  const calls: unknown[][] = [];
+  console.log = (...args: unknown[]) => {
+    calls.push(args);
+  };
+  return run(calls).finally(() => {
+    console.log = original;
+  });
+}
+
+test("toda chamada ao provider gera exatamente uma linha llm_planning_call", async () => {
+  await withConsoleLogSpy(async calls => {
+    const provider = fixedProvider({ status: "NOT_UNDERSTOOD", reason: "GENERIC" });
+    const interpreter = createLlmInterpreter({ provider });
+    await interpreter.interpret({ text: "oi", session: atStep("START") });
+
+    assert.equal(calls.length, 1);
+    const [logged] = calls[0]!;
+    assert.equal(typeof logged, "string");
+    const parsed = JSON.parse(logged as string);
+    assert.equal(parsed.event, "llm_planning_call");
+    assert.equal(parsed.status, "NOT_UNDERSTOOD");
+    assert.equal(parsed.reason, "GENERIC");
+    assert.equal(typeof parsed.durationMs, "number");
+    assert.ok(parsed.durationMs >= 0);
+    assert.equal(typeof parsed.timestamp, "string");
+    assert.ok(!Number.isNaN(Date.parse(parsed.timestamp)));
+  });
+});
+
+test("log de MATCHED inclui actionTypes e confidence, nunca PII", async () => {
+  await withConsoleLogSpy(async calls => {
+    const provider = fixedProvider({
+      status: "MATCHED",
+      actions: [{ type: "ADD_ITEM", productId: "p1", quantity: 2 }],
+      confidence: "HIGH",
+    });
+    const interpreter = createLlmInterpreter({ provider });
+    const session = atStep("BUILDING_ORDER", { contactId: "contato-secreto-5511999999999" });
+    await interpreter.interpret({
+      text: "quero dois tradicionais, meu telefone é 5511999999999",
+      session,
+      context: PRODUCTS_CONTEXT,
+    });
+
+    assert.equal(calls.length, 1);
+    const parsed = JSON.parse(calls[0]![0] as string);
+    assert.equal(parsed.event, "llm_planning_call");
+    assert.equal(parsed.status, "MATCHED");
+    assert.deepEqual(parsed.actionTypes, ["ADD_ITEM"]);
+    assert.equal(parsed.confidence, "HIGH");
+
+    const serialized = JSON.stringify(parsed);
+    assert.ok(!serialized.includes("contato-secreto"));
+    assert.ok(!serialized.includes("5511999999999"));
+    assert.ok(!serialized.includes("tradicionais"));
+  });
+});
+
+test("log dispara também em PROVIDER_ERROR e REJECTED, com reason presente", async () => {
+  await withConsoleLogSpy(async calls => {
+    const provider = new FakeLlmProvider(async () => {
+      throw new Error("boom");
+    });
+    const interpreter = createLlmInterpreter({ provider });
+    await interpreter.interpret({ text: "oi", session: atStep("START") });
+
+    assert.equal(calls.length, 1);
+    const parsed = JSON.parse(calls[0]![0] as string);
+    assert.equal(parsed.event, "llm_planning_call");
+    assert.equal(parsed.status, "PROVIDER_ERROR");
+    assert.equal(typeof parsed.reason, "string");
+  });
+});
+
+test("o logging permanente não altera o resultado devolvido por interpret()", async () => {
+  await withConsoleLogSpy(async () => {
+    const provider = fixedProvider({
+      status: "MATCHED",
+      actions: [{ type: "ADD_ITEM", productId: "p1", quantity: 1 }],
+    });
+    const interpreter = createLlmInterpreter({ provider });
+    const result = await interpreter.interpret({
+      text: "quero um",
+      session: atStep("BUILDING_ORDER"),
+      context: PRODUCTS_CONTEXT,
+    });
+    assert.equal(result.status, "MATCHED");
+    if (result.status === "MATCHED") {
+      assert.deepEqual(result.actions, [{ type: "ADD_ITEM", productId: "p1", quantity: 1 }]);
+    }
+  });
+});

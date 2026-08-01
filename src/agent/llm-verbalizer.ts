@@ -84,6 +84,29 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+// Logging permanente de latência real (verbalização = chamada NVIDIA #2).
+// Preparado para quando BF_VERBALIZATION_MODE=ENABLED for ligado em
+// produção — hoje nunca dispara ali (verbalização segue DISABLED), mas o
+// mecanismo já existe para não depender de outro deploy nesse dia. Mesma
+// disciplina do log de planejamento: nunca inclui responseText, usedFactIds
+// ou qualquer dado derivado da mensagem do cliente — apenas status/reason
+// (ambos enums já classificados) e durationMs.
+function logVerbalizationCall(result: VerbalizationResult): void {
+  const entry: Record<string, unknown> = {
+    event: "llm_verbalization_call",
+    status: result.status,
+    durationMs: result.durationMs,
+    timestamp: new Date().toISOString(),
+  };
+  if (result.status !== "VERBALIZED") entry.reason = result.reason;
+  console.log(JSON.stringify(entry));
+}
+
+function logAndReturn(result: VerbalizationResult): VerbalizationResult {
+  logVerbalizationCall(result);
+  return result;
+}
+
 function extractUsedFactIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
@@ -126,26 +149,26 @@ export function createLlmVerbalizer(input: CreateLlmVerbalizerInput): LlmVerbali
         const durationMs = Date.now() - startedAt;
         const isTimeout = error instanceof Error && error.message === PROVIDER_TIMEOUT_MARKER;
         const providerError = isTimeout ? { reason: "TIMEOUT", retryable: true } : extractSafeProviderError(error);
-        return { status: "PROVIDER_ERROR", reason: providerError.reason, retryable: providerError.retryable, durationMs };
+        return logAndReturn({ status: "PROVIDER_ERROR", reason: providerError.reason, retryable: providerError.retryable, durationMs });
       }
 
       const durationMs = Date.now() - startedAt;
       const parsed = parseLlmOutput(raw, maxOutputLength);
-      if (parsed.ok === false) return { status: "REJECTED", reason: parsed.reason, durationMs };
+      if (parsed.ok === false) return logAndReturn({ status: "REJECTED", reason: parsed.reason, durationMs });
 
       const value = parsed.value;
       if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return { status: "REJECTED", reason: "INVALID_SCHEMA", durationMs };
+        return logAndReturn({ status: "REJECTED", reason: "INVALID_SCHEMA", durationMs });
       }
       const obj = value as Record<string, unknown>;
       const responseText = typeof obj.responseText === "string" ? obj.responseText.trim() : "";
-      if (!responseText) return { status: "REJECTED", reason: "EMPTY_RESPONSE_TEXT", durationMs };
+      if (!responseText) return logAndReturn({ status: "REJECTED", reason: "EMPTY_RESPONSE_TEXT", durationMs });
       if (responseText.length > VERBALIZER_RESPONSE_TEXT_MAX_LENGTH) {
-        return { status: "REJECTED", reason: "RESPONSE_TEXT_TOO_LONG", durationMs };
+        return logAndReturn({ status: "REJECTED", reason: "RESPONSE_TEXT_TOO_LONG", durationMs });
       }
 
       const usedFactIds = extractUsedFactIds(obj.usedFactIds);
-      return { status: "VERBALIZED", text: responseText, usedFactIds, durationMs };
+      return logAndReturn({ status: "VERBALIZED", text: responseText, usedFactIds, durationMs });
     },
   };
 }

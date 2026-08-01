@@ -98,6 +98,33 @@ function logShowMenuMatch(input: {
   console.warn(JSON.stringify({ tag: "llm_interpreter_show_menu_matched", ...input }));
 }
 
+// Logging permanente de latência real (planejamento = chamada NVIDIA #1).
+// Sempre ativo em produção — não atrás de flag extra, já que só dispara
+// quando BF_LLM_MODE=NVIDIA_NEMOTRON (decisão deliberada de configuração).
+// Uma linha JSON por chamada ao provider, para permitir calcular p50/p95 a
+// partir dos logs do Railway depois. Nunca inclui texto do cliente,
+// contactId, ou qualquer outro dado de sessão — apenas metadados já
+// classificados (status/reason/actionTypes/confidence, todos enums).
+function logPlanningCall(result: LlmInterpretationResult): void {
+  const entry: Record<string, unknown> = {
+    event: "llm_planning_call",
+    status: result.status,
+    durationMs: result.durationMs,
+    timestamp: new Date().toISOString(),
+  };
+  if (result.status === "MATCHED") entry.actionTypes = result.actions.map(action => action.type);
+  if (result.status !== "MATCHED" && "reason" in result) entry.reason = result.reason;
+  if ((result.status === "MATCHED" || result.status === "NOT_UNDERSTOOD" || result.status === "AMBIGUOUS") && result.confidence) {
+    entry.confidence = result.confidence;
+  }
+  console.log(JSON.stringify(entry));
+}
+
+function logAndReturn(result: LlmInterpretationResult): LlmInterpretationResult {
+  logPlanningCall(result);
+  return result;
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_resolve, reject) => {
@@ -147,13 +174,13 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
         const providerError = isTimeout
           ? { reason: "TIMEOUT", retryable: true }
           : extractSafeProviderError(error);
-        return {
+        return logAndReturn({
           status: "PROVIDER_ERROR",
           reason: providerError.reason,
           retryable: providerError.retryable,
           promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
           durationMs,
-        };
+        });
       }
 
       const durationMs = Date.now() - startedAt;
@@ -176,7 +203,7 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
             ...(validated.confidence ? { confidence: validated.confidence } : {}),
           });
         }
-        return {
+        return logAndReturn({
           status: "MATCHED",
           actions: validated.actions,
           source: "LLM",
@@ -185,10 +212,10 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           ...(validated.intent ? { intent: validated.intent } : {}),
           ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
           ...(validated.confidence ? { confidence: validated.confidence } : {}),
-        };
+        });
       }
       if (validated.status === "NOT_UNDERSTOOD") {
-        return {
+        return logAndReturn({
           status: "NOT_UNDERSTOOD",
           reason: validated.reason,
           ...(validated.suggestions ? { suggestions: validated.suggestions } : {}),
@@ -198,10 +225,10 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           ...(validated.intent ? { intent: validated.intent } : {}),
           ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
           ...(validated.confidence ? { confidence: validated.confidence } : {}),
-        };
+        });
       }
       if (validated.status === "AMBIGUOUS") {
-        return {
+        return logAndReturn({
           status: "AMBIGUOUS",
           reason: validated.reason,
           ...(validated.candidates ? { candidates: validated.candidates } : {}),
@@ -211,15 +238,15 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           ...(validated.intent ? { intent: validated.intent } : {}),
           ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
           ...(validated.confidence ? { confidence: validated.confidence } : {}),
-        };
+        });
       }
-      return {
+      return logAndReturn({
         status: "REJECTED",
         reason: validated.reason,
         source: "VALIDATOR",
         promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
         durationMs,
-      };
+      });
     },
   };
 }
