@@ -258,14 +258,16 @@ function OperatingHoursEditor({ operatingHours, headers, onSaved }: { operatingH
             const ranges = hours[day];
             const open = ranges.length > 0;
             return (
-              <article className="order-card" key={day}>
-                <div className="choice-row">
+              <article className="order-card schedule-day" key={day}>
+                <div className="choice-row day-header">
                   <h3>{WEEKDAY_LABELS_PT_BR[day]}</h3>
-                  <span className={open ? "avail-label" : "avail-label off"}>{open ? "Aberto" : "Fechado"}</span>
-                  <button type="button" className={open ? "switch on" : "switch"} aria-label={`Marcar ${WEEKDAY_LABELS_PT_BR[day]} como ${open ? "fechado" : "aberto"}`} onClick={() => toggleDayOpen(day)}><i /></button>
+                  <div className="day-toggle-group">
+                    <span className={open ? "avail-label" : "avail-label off"}>{open ? "Aberto" : "Fechado"}</span>
+                    <button type="button" className={open ? "switch on" : "switch"} aria-label={`Marcar ${WEEKDAY_LABELS_PT_BR[day]} como ${open ? "fechado" : "aberto"}`} onClick={() => toggleDayOpen(day)}><i /></button>
+                  </div>
                 </div>
                 {open && ranges.map((range, index) => (
-                  <div className="choice-row" key={index}>
+                  <div className="choice-row day-range" key={index}>
                     <label>Abre<input aria-label={`Abertura de ${WEEKDAY_LABELS_PT_BR[day]}, intervalo ${index + 1}`} type="time" value={range.open} onChange={e => updateRange(day, index, { open: e.target.value })} /></label>
                     <label>Fecha<input aria-label={`Encerramento de ${WEEKDAY_LABELS_PT_BR[day]}, intervalo ${index + 1}`} type="time" value={range.close} onChange={e => updateRange(day, index, { close: e.target.value })} /></label>
                     <button type="button" className="text-button" aria-label={`Remover intervalo ${index + 1} de ${WEEKDAY_LABELS_PT_BR[day]}`} onClick={() => removeRange(day, index)}>Remover</button>
@@ -276,19 +278,23 @@ function OperatingHoursEditor({ operatingHours, headers, onSaved }: { operatingH
             );
           })}
         </div>
-        <p className="subtle">Copiar horário de um dia para outros dias:</p>
-        <div className="choice-row">
-          <label>Copiar de<select aria-label="Copiar horário de" value={copySource} onChange={e => setCopySource(e.target.value as Weekday)}>{WEEKDAYS.map(day => <option value={day} key={day}>{WEEKDAY_LABELS_PT_BR[day]}</option>)}</select></label>
+        <div className="copy-schedule">
+          <p className="subtle">Copiar horário de um dia para outros dias:</p>
+          <div className="choice-row">
+            <label>Copiar de<select aria-label="Copiar horário de" value={copySource} onChange={e => setCopySource(e.target.value as Weekday)}>{WEEKDAYS.map(day => <option value={day} key={day}>{WEEKDAY_LABELS_PT_BR[day]}</option>)}</select></label>
+          </div>
+          <div className="day-picker">
+            {WEEKDAYS.map(day => (
+              <label className={copyTargets[day] ? "day-check checked" : "day-check"} key={day}><input type="checkbox" checked={copyTargets[day]} disabled={day === copySource} onChange={e => setCopyTargets({ ...copyTargets, [day]: e.target.checked })} /> {WEEKDAY_LABELS_PT_BR[day]}</label>
+            ))}
+          </div>
+          <button type="button" className="secondary" onClick={copyToTargets}>Copiar para os dias marcados</button>
         </div>
-        <div className="choice-row">
-          {WEEKDAYS.map(day => (
-            <label key={day}><input type="checkbox" checked={copyTargets[day]} disabled={day === copySource} onChange={e => setCopyTargets({ ...copyTargets, [day]: e.target.checked })} /> {WEEKDAY_LABELS_PT_BR[day]}</label>
-          ))}
-        </div>
-        <button type="button" className="secondary" onClick={copyToTargets}>Copiar para os dias marcados</button>
         {errors.length > 0 && <div className="error">{errors.map((message, i) => <p key={i}>{message}</p>)}</div>}
       </fieldset>
-      <button className="primary" disabled={saving}>{saving ? "Salvando…" : "Salvar horários de funcionamento"}</button>
+      <div className="form-actions">
+        <button className="primary" disabled={saving}>{saving ? "Salvando…" : "Salvar horários de funcionamento"}</button>
+      </div>
     </form>
   );
 }
