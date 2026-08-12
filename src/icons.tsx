@@ -12,8 +12,11 @@ export const Clipboard = icon("▤");
 export const Coffee = icon("●");
 export const Edit3 = icon("✎");
 export const Minus = icon("−");
+export const MessageCircle = icon("◌");
 export const Package = icon("□");
 export const Plus = icon("+");
+export const RotateCcw = icon("↻");
+export const Send = icon("➜");
 export const Settings = icon("⚙");
 export function GiftBox({ size = 16, ...props }: SvgProps) {
   return (
