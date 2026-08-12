@@ -829,6 +829,11 @@ test("LLM com duas ações válidas executa o lote, preserva a ordem e zera o co
   assert.equal(result.policy.misunderstandingCountAfter, 0);
   assert.equal(result.sessionAfter.misunderstandingCount, 0);
   assert.equal(sessionStore.get(sessionKey2)?.misunderstandingCount, 0);
+  // Regressão do bug P1: a mensagem de confirmação precisa citar os DOIS
+  // produtos do lote, não só o último (antes só "Brownie Ninho" aparecia).
+  const combinedText = result.messages.map(m => m.text).join(" ");
+  assert.match(combinedText, /Brownie de Brigadeiro/);
+  assert.match(combinedText, /Brownie Ninho/);
 });
 
 test("lote rejeitado no preflight não altera o carrinho e incrementa o contador uma única vez", async () => {

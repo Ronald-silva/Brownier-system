@@ -115,6 +115,19 @@ function factsFromResult(result: AgentConversationResult, tools: AgentTools): Al
       facts.push(cartSummaryFact(tools, session.items));
       break;
     }
+    case "ITEMS_ADDED_BATCH": {
+      const items = Array.isArray((data as { items?: unknown } | undefined)?.items)
+        ? ((data as { items: Array<{ productId?: unknown }> }).items)
+        : [];
+      for (const item of items) {
+        if (typeof item?.productId === "string") {
+          const fact = productFact(tools, item.productId);
+          if (fact) facts.push(fact);
+        }
+      }
+      facts.push(cartSummaryFact(tools, session.items));
+      break;
+    }
     case "CART_READY":
     case "ORDER_REVIEW": {
       facts.push(cartSummaryFact(tools, session.items));

@@ -151,6 +151,28 @@ export function buildConversationPresentation(
     }
   }
 
+  // Lote de múltiplos ADD_ITEM: o Text Conversation Service monta um
+  // messageKey sintético com todos os produtos/quantidades finais do lote em
+  // `data.items` — nunca inventado aqui, só resolvido pelo productId real.
+  if (messageKey === "ITEMS_ADDED_BATCH") {
+    const productMap = new Map(getProducts().map(product => [product.id, product]));
+    const rawItems = Array.isArray(data?.items) ? (data.items as unknown[]) : [];
+    context.cartItems = rawItems
+      .filter((item): item is { productId: string; quantity: number } => {
+        const candidate = item as { productId?: unknown; quantity?: unknown } | null;
+        return !!candidate && typeof candidate.productId === "string" && typeof candidate.quantity === "number";
+      })
+      .map(item => {
+        const product = productMap.get(item.productId);
+        return {
+          productId: item.productId,
+          name: product?.name ?? "Produto indisponível",
+          quantity: item.quantity,
+          unitPrice: product?.basePrice,
+        };
+      });
+  }
+
   if (PAYMENT_OPTIONS_KEYS.has(messageKey) || messageKey === "ORDER_REVIEW") {
     context.paymentOptions = normalizePaymentOptions(getBusiness().paymentMethods);
   }

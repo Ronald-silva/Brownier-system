@@ -142,7 +142,7 @@ test("placeholder inexistente no data não lança erro e fica vazio", () => {
 
 test("nenhum messageKey conhecido fica sem mensagem renderizada", () => {
   const keys = [
-    "WELCOME", "MENU_READY", "CART_READY", "ITEM_ADDED", "ITEM_QUANTITY_UPDATED", "ITEM_REMOVED",
+    "WELCOME", "MENU_READY", "CART_READY", "ITEM_ADDED", "ITEMS_ADDED_BATCH", "ITEM_QUANTITY_UPDATED", "ITEM_REMOVED",
     "CART_EMPTY", "INVALID_PRODUCT", "INVALID_QUANTITY", "ASK_CUSTOMER_NAME", "INVALID_CUSTOMER_NAME",
     "CUSTOMER_PHONE_SET", "INVALID_CUSTOMER_PHONE", "ASK_FULFILLMENT", "ASK_PICKUP_TIME", "INVALID_PICKUP_TIME",
     "ASK_NOTES", "INVALID_CUSTOMER_NOTES", "ASK_PAYMENT_METHOD", "PAYMENT_METHOD_ACCEPTED", "PAYMENT_METHOD_INVALID",
@@ -208,6 +208,25 @@ test("ITEM_ADDED sem nome resolvido usa mensagem genérica sem productId técnic
   const messages = renderConversationPresentation(makePresentation("ITEM_ADDED", {}, { productId: "p1", quantity: 2 }));
   assert.doesNotMatch(messages[0].text, /p1/);
   assert.match(messages[0].text, /2x/);
+});
+
+test("ITEMS_ADDED_BATCH lista todos os produtos do lote, não só o último", () => {
+  const messages = renderConversationPresentation(
+    makePresentation("ITEMS_ADDED_BATCH", {
+      cartItems: [
+        { productId: "p1", name: "Brownie de Brigadeiro", quantity: 2 },
+        { productId: "p2", name: "Brownie de Ninho", quantity: 1 },
+      ],
+    }),
+  );
+  assert.match(messages[0].text, /2x Brownie de Brigadeiro/);
+  assert.match(messages[0].text, /1x Brownie de Ninho/);
+});
+
+test("ITEMS_ADDED_BATCH sem itens resolvidos não lança erro e não fica em branco", () => {
+  const messages = renderConversationPresentation(makePresentation("ITEMS_ADDED_BATCH", { cartItems: [] }));
+  assert.equal(messages.length, 1);
+  assert.ok(messages[0].text.length > 0);
 });
 
 test("ASK_PAYMENT_METHOD com opções no contexto", () => {

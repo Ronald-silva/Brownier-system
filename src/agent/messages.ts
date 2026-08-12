@@ -92,6 +92,10 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   CART_READY: "Seu carrinho está aberto. Envie mais itens ou finalize quando estiver pronto.",
   ITEM_ADDED: "Item adicionado! Quantidade atual: {quantity}x.",
   ITEM_ADDED_WITH_NAME: "Adicionamos {quantity}x {productName} ao seu pedido.",
+  // Usado quando um único lote de ações adiciona mais de um produto (ex.:
+  // "2 brigadeiros e 1 de ninho" interpretado pela verbalização em uma só
+  // mensagem) — ITEM_ADDED_WITH_NAME só descreve um produto por vez.
+  ITEMS_ADDED_BATCH: "Adicionamos ao seu pedido:\n{items}",
   ITEM_QUANTITY_UPDATED: "Quantidade atualizada para {quantity}x.",
   ITEM_QUANTITY_UPDATED_WITH_NAME: "Quantidade de {productName} atualizada para {quantity}x.",
   ITEM_REMOVED: "Item removido do seu pedido.",

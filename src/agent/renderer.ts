@@ -50,6 +50,13 @@ function buildText(messageKey: string, context: AgentPresentationContext, data: 
         : interpolate(MESSAGE_CATALOG.ITEM_ADDED, { quantity: d.quantity });
     }
 
+    case "ITEMS_ADDED_BATCH": {
+      const items = context.cartItems ?? [];
+      if (items.length === 0) return MESSAGE_CATALOG.ITEM_ADDED;
+      const lines = items.map(item => `${item.quantity}x ${item.name}`);
+      return interpolate(MESSAGE_CATALOG.ITEMS_ADDED_BATCH, { items: formatList(lines) });
+    }
+
     case "ITEM_QUANTITY_UPDATED": {
       const name = context.currentProduct?.name;
       return name

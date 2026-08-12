@@ -948,12 +948,41 @@ export function createTextConversationService(
             sessionAfter = sessionStore.get(sessionKey)!;
           }
           sessionAfter = structuredClone(sessionAfter);
-          const presentation = buildConversationPresentation({ result: lastResult.result, session: sessionAfter, tools });
+
+          // Lote de múltiplos ADD_ITEM (ex.: "2 brigadeiros e 1 de ninho" em
+          // uma só mensagem via verbalização): o template padrão de
+          // ITEM_ADDED só descreve um produto, então usar `lastResult`
+          // sozinho mostra apenas o último item ao cliente, mesmo com o
+          // carrinho correto internamente. Quando TODAS as ações do lote
+          // forem ADD_ITEM, a apresentação/renderização usam uma chave
+          // agregada com produto+quantidade final de cada item do lote.
+          // O `result` estrutural devolvido ao chamador (abaixo, fora deste
+          // bloco) continua sendo o da última ação — só o texto exibido
+          // muda; nenhum contrato de dados existente é alterado.
+          const itemAddedResults = batchResult.results.filter(r => r.result.messageKey === "ITEM_ADDED");
+          const isPureAddItemBatch =
+            itemAddedResults.length > 1 && itemAddedResults.length === batchResult.results.length;
+          let presentationResult = lastResult.result;
+          if (isPureAddItemBatch) {
+            const quantityByProduct = new Map<string, number>();
+            for (const itemResult of itemAddedResults) {
+              const itemData = itemResult.result.data as { productId?: unknown; quantity?: unknown } | undefined;
+              if (typeof itemData?.productId === "string" && typeof itemData?.quantity === "number") {
+                quantityByProduct.set(itemData.productId, itemData.quantity);
+              }
+            }
+            presentationResult = {
+              ...lastResult.result,
+              messageKey: "ITEMS_ADDED_BATCH",
+              data: { items: Array.from(quantityByProduct, ([productId, quantity]) => ({ productId, quantity })) },
+            };
+          }
+          const presentation = buildConversationPresentation({ result: presentationResult, session: sessionAfter, tools });
           const templateMessages = renderConversationPresentation(presentation);
           const responseIntent = llmOutcome.responseIntent ?? DEFAULT_CONFIRM_RESPONSE_INTENT;
           const confidence = llmOutcome.confidence ?? "HIGH";
           const facts = buildAllowedFacts({
-            result: lastResult.result,
+            result: presentationResult,
             tools,
             operatingStatus: tools.getOperatingStatus?.(),
             requestedFactKeys: responseIntent.kind === "ANSWER_FACTUAL" ? responseIntent.factKeys : undefined,
@@ -969,7 +998,7 @@ export function createTextConversationService(
             shortHistory: appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString() }),
             businessName: tools.getBusiness().name,
             catalogProductNames: tools.listProducts().map(p => p.name),
-            messageKey: lastResult.result.messageKey,
+            messageKey: presentationResult.messageKey,
           });
           if (shortHistoryEnabled) {
             sessionAfter = structuredClone(

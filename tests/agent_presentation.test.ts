@@ -173,6 +173,33 @@ test("ITEM_ADDED sem produto resolvido permanece seguro", () => {
   assert.equal(presentation.context.currentProduct, undefined);
 });
 
+test("ITEMS_ADDED_BATCH resolve nome e quantidade de cada item do lote", () => {
+  const { tools } = createSpyTools();
+  const presentation = buildConversationPresentation({
+    result: makeResult({
+      messageKey: "ITEMS_ADDED_BATCH",
+      data: { items: [{ productId: "p1", quantity: 2 }, { productId: "outro-produto", quantity: 1 }] },
+    }),
+    tools,
+  });
+  assert.deepEqual(
+    presentation.context.cartItems?.map(item => ({ productId: item.productId, name: item.name, quantity: item.quantity })),
+    [
+      { productId: "p1", name: "Brownie de Brigadeiro", quantity: 2 },
+      { productId: "outro-produto", name: "Produto indisponível", quantity: 1 },
+    ],
+  );
+});
+
+test("ITEMS_ADDED_BATCH com produto inexistente permanece seguro", () => {
+  const { tools } = createSpyTools();
+  const presentation = buildConversationPresentation({
+    result: makeResult({ messageKey: "ITEMS_ADDED_BATCH", data: { items: [{ productId: "inexistente", quantity: 1 }] } }),
+    tools,
+  });
+  assert.equal(presentation.context.cartItems?.[0]?.name, "Produto indisponível");
+});
+
 test("ITEM_REMOVED resolve nome quando possível", () => {
   const { tools } = createSpyTools();
   const presentation = buildConversationPresentation({
@@ -379,10 +406,10 @@ test("tools.createOrder nunca é chamada pela apresentação", () => {
   const { tools, calls } = createSpyTools();
   const session = makeSession({ items: [{ productId: "p1", quantity: 2 }] });
   for (const messageKey of [
-    "WELCOME", "MENU_READY", "ITEM_ADDED", "ASK_PAYMENT_METHOD", "ASK_PICKUP_TIME", "ORDER_REVIEW", "ORDER_CREATED",
+    "WELCOME", "MENU_READY", "ITEM_ADDED", "ITEMS_ADDED_BATCH", "ASK_PAYMENT_METHOD", "ASK_PICKUP_TIME", "ORDER_REVIEW", "ORDER_CREATED",
   ]) {
     buildConversationPresentation({
-      result: makeResult({ messageKey, session, data: { productId: "p1", quantity: 1, publicCode: "X" } }),
+      result: makeResult({ messageKey, session, data: { productId: "p1", quantity: 1, publicCode: "X", items: [{ productId: "p1", quantity: 1 }] } }),
       session,
       tools,
     });
