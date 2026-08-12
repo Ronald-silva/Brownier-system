@@ -176,6 +176,14 @@ async function startServer() {
       : undefined,
   });
   const evolutionSender = evolutionConfig ? createEvolutionGoTextSender({ config: evolutionConfig }) : undefined;
+  // Canal web para a apresentação: usa exatamente o mesmo runtime que atende
+  // o WhatsApp, mas trabalha sobre uma cópia do cardápio e nunca persiste
+  // pedidos. Assim a demo não depende da Evolution nem polui a operação.
+  const webDemoConversation = createWhatsappConversationRuntime({
+    loadDomainStore: async () => structuredClone((await loadStore()) as Store),
+    saveDomainStore: async () => undefined,
+    maxMisunderstandings: maxMisunderstandingsRaw ? Number(maxMisunderstandingsRaw) : undefined,
+  });
 
   app.get("/health", createHealthHandler());
   app.post("/api/webhooks/evolution-go", createEvolutionGoWebhookHandler({
@@ -198,6 +206,25 @@ async function startServer() {
   app.get("/api/public/promotions", async (_req, res) => {
     const products = (await loadStore()).products.filter(p => p.isActive && p.promotionalPrice && p.minimumPromotionalQuantity).map(publicProduct);
     res.json(products);
+  });
+  app.post("/api/public/agent/messages", publicRateLimit, async (req, res) => {
+    const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!/^[a-zA-Z0-9_-]{8,100}$/.test(sessionId) || !text || text.length > 1_500) {
+      return res.status(400).json({ error: "Mensagem de demonstração inválida." });
+    }
+    try {
+      const result = await webDemoConversation.processText({
+        channel: "webchat",
+        contactId: `web-demo-${sessionId}`,
+        messageId: crypto.randomUUID(),
+        text,
+      });
+      res.json({ messages: result.messages.map(message => ({ id: message.id, text: message.text })) });
+    } catch (error) {
+      console.error("Falha no chat de demonstração", error);
+      res.status(503).json({ error: "O assistente está indisponível por um instante. Tente novamente." });
+    }
   });
   app.get("/api/public/orders/:publicCode", publicRateLimit, async (req, res) => {
     const order = (await loadStore()).orders.find(o => o.publicCode === req.params.publicCode);

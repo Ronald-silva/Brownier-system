@@ -7,9 +7,14 @@ import { buildAgentSessionKey, InMemoryAgentSessionStore } from "./session.store
 import { createTextConversationService, type ProcessTextResult } from "./text-conversation.service.ts";
 import { createAgentTools, type AgentDomainStore } from "./tools.ts";
 
+// "webchat" foi adicionado para o canal de demonstração no próprio app (ver
+// server.ts). O runtime é genérico por canal desde sempre — só o tipo era
+// restrito a "whatsapp" por não haver, até aqui, um segundo consumidor real.
+export type AgentRuntimeChannel = "whatsapp" | "webchat";
+
 export type WhatsappConversationRuntime = {
-  processText(input: { channel: "whatsapp"; contactId: string; messageId: string; text: string }): Promise<ProcessTextResult>;
-  markResponseDelivered?(input: { channel: "whatsapp"; contactId: string; messageId: string }): Promise<void>;
+  processText(input: { channel: AgentRuntimeChannel; contactId: string; messageId: string; text: string }): Promise<ProcessTextResult>;
+  markResponseDelivered?(input: { channel: AgentRuntimeChannel; contactId: string; messageId: string }): Promise<void>;
 };
 
 // Mantém apenas a sessão em memória, conforme o contrato atual. O store de
@@ -108,7 +113,7 @@ export function createWhatsappConversationRuntime(input: {
       });
     },
     ...(input.persistentState
-      ? { markResponseDelivered: async (message: { channel: "whatsapp"; contactId: string; messageId: string }) => input.persistentState!.markResponseDelivered(message) }
+      ? { markResponseDelivered: async (message: { channel: AgentRuntimeChannel; contactId: string; messageId: string }) => input.persistentState!.markResponseDelivered(message) }
       : {}),
   };
 }
