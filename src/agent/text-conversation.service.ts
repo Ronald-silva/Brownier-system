@@ -791,10 +791,21 @@ export function createTextConversationService(
       // reexecutar SHOW_MENU. Só se aplica à ação vinda do LLM: SHOW_MENU
       // determinístico (factual ou do interpretador determinístico) não
       // passa por aqui e continua funcionando igual.
+      //
+      // `actions.length >= 1` (em vez de `=== 1`) cobre também o caso real
+      // observado em produção: o planejamento às vezes devolve SHOW_MENU
+      // dentro de um LOTE de 2+ ações (ex.: duplicado), que sem isso
+      // executaria pelo caminho de lote — sem nenhuma proteção de
+      // repetição, já que o lote nunca passava por aqui. `.every()` garante
+      // que só um lote 100% composto por SHOW_MENU cai na guarda; um lote
+      // real com SHOW_MENU misturado a outra ação de negócio (não
+      // reproduzido até agora, mas não impossível) continua fora do escopo
+      // desta guarda e seria tratado como um incidente novo, não como
+      // repetição de cardápio.
       if (
         llmOutcome?.status === "MATCHED" &&
-        llmOutcome.actions.length === 1 &&
-        llmOutcome.actions[0]!.type === "SHOW_MENU" &&
+        llmOutcome.actions.length >= 1 &&
+        llmOutcome.actions.every(action => action.type === "SHOW_MENU") &&
         sessionBefore.lastMessageKey === "MENU_READY" &&
         (sessionBefore.step === "BROWSING_MENU" || sessionBefore.step === "BUILDING_ORDER") &&
         !mentionsMenuRequestCue(text)

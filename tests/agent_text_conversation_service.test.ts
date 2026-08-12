@@ -1501,6 +1501,32 @@ test("guarda: pedir cardápio via palavra-chave factual duas vezes seguidas tamb
   assert.equal(sessionStore.get(sessionKey)?.lastMessageKey, "MENU_READY");
 });
 
+test("guarda: lote com SHOW_MENU repetido (2+ ações, todas SHOW_MENU) também é bloqueado, não só ação única", async () => {
+  // Bug real observado em produção: o planejamento NVIDIA às vezes devolve
+  // SHOW_MENU dentro de um lote de 2+ ações (ex.: duplicado) em vez de uma
+  // ação única — isso executava pelo caminho de lote, que não tinha
+  // nenhuma proteção contra repetição, reenviando o cardápio a cada
+  // mensagem não compreendida, indefinidamente.
+  const { textService, sessionStore } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmMatched([{ type: "SHOW_MENU" }, { type: "SHOW_MENU" }]),
+  });
+  const contactId = "guard-batch-show-menu-twice";
+
+  const first = await textService.processText({ channel: CH, contactId, text: "hello" });
+  assert.equal(first.result?.event, "MENU_READY");
+  assert.equal(first.execution?.mode, "ACTION_BATCH");
+
+  const second = await textService.processText({ channel: CH, contactId, text: "bye" });
+  assert.notEqual(second.result?.event, "MENU_READY");
+  assert.equal(second.policyResult?.messageKey, "INTERPRETATION_NOT_UNDERSTOOD");
+  assert.equal(second.execution, undefined);
+
+  const sessionKey = buildAgentSessionKey(CH, contactId);
+  assert.equal(sessionStore.get(sessionKey)?.items.length, 0);
+});
+
 test("guarda: reproduz a sequência real do incidente (pedido multi-item seguido de pergunta sobre retirada) — a segunda não vira MENU_READY de novo", async () => {
   let call = 0;
   const { textService, sessionStore } = makeStack({
