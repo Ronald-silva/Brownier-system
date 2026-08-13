@@ -6,7 +6,7 @@
 // não persiste sessão e não calcula preço.
 import type { AgentConversationResult } from "./conversation.types.ts";
 import type { AgentSession } from "./session.types.ts";
-import type { AgentTools, AgentPublicProduct } from "./tools.ts";
+import type { AgentCartQuote, AgentTools, AgentPublicProduct } from "./tools.ts";
 
 export type AgentPresentationProduct = {
   id: string;
@@ -28,6 +28,7 @@ export type AgentPresentationContext = {
   products?: AgentPresentationProduct[];
   currentProduct?: AgentPresentationProduct;
   cartItems?: AgentPresentationCartItem[];
+  cartQuote?: AgentCartQuote;
   paymentOptions?: string[];
   pickupSlots?: string[];
   customerName?: string;
@@ -149,6 +150,14 @@ export function buildConversationPresentation(
       const product = tools.getProduct(productId);
       if (product) context.currentProduct = toPresentationProduct(structuredClone(product));
     }
+  }
+
+  // Mostra o valor atualizado logo após cada alteração do carrinho e na
+  // revisão. A cotação vem da Tool, que reutiliza a regra oficial de preços
+  // (inclusive promoções por quantidade), nunca de conta feita no Renderer.
+  if (messageKey === "ITEM_ADDED" || messageKey === "ITEMS_ADDED_BATCH" || messageKey === "ITEM_QUANTITY_UPDATED" || messageKey === "ITEM_REMOVED" || messageKey === "CART_READY" || messageKey === "ORDER_REVIEW") {
+    const quote = tools.quoteCart?.(session.items);
+    if (quote) context.cartQuote = structuredClone(quote);
   }
 
   // Lote de múltiplos ADD_ITEM: o Text Conversation Service monta um

@@ -204,6 +204,31 @@ test("ITEM_ADDED com nome do produto resolvido", () => {
   assert.match(messages[0].text, /2x/);
 });
 
+test("ITEM_ADDED informa o total parcial calculado pelo servidor", () => {
+  const messages = renderConversationPresentation(
+    makePresentation(
+      "ITEM_ADDED",
+      {
+        currentProduct: { id: "p1", name: "Brownie de Brigadeiro" },
+        cartQuote: { items: [], subtotal: 24, discount: 0, total: 24 },
+      },
+      { quantity: 2 },
+    ),
+  );
+  assert.match(messages[0].text, /Total parcial: R\$ 24,00/);
+});
+
+test("ORDER_REVIEW informa desconto e total do pedido", () => {
+  const messages = renderConversationPresentation(
+    makePresentation("ORDER_REVIEW", {
+      cartItems: [{ productId: "p1", name: "Brownie de Brigadeiro", quantity: 20, unitPrice: 3 }],
+      cartQuote: { items: [], subtotal: 60, discount: 40, total: 60 },
+    }),
+  );
+  assert.match(messages[0].text, /Desconto:\nR\$ 40,00/);
+  assert.match(messages[0].text, /Total do pedido:\nR\$ 60,00/);
+});
+
 test("ITEM_ADDED sem nome resolvido usa mensagem genérica sem productId técnico", () => {
   const messages = renderConversationPresentation(makePresentation("ITEM_ADDED", {}, { productId: "p1", quantity: 2 }));
   assert.doesNotMatch(messages[0].text, /p1/);
@@ -324,6 +349,11 @@ test("renderTextConversationPolicyMessage renderiza POLICY_LLM_TEMPORARILY_UNAVA
   assert.equal(messages[0]!.metadata?.policyMessageKey, "POLICY_LLM_TEMPORARILY_UNAVAILABLE");
   assert.match(messages[0]!.text, /cardápio|pedido|atendente/i);
   assert.doesNotMatch(messages[0]!.text, /Não consegui processar sua mensagem agora/);
+});
+
+test("renderTextConversationPolicyMessage informa o total sem depender do LLM", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "CART_TOTAL", data: { total: "R$ 24,00" } });
+  assert.match(messages[0].text, /R\$ 24,00/);
 });
 
 test("Renderer não importa Agent Tools", async () => {

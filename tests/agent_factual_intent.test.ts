@@ -38,6 +38,10 @@ test("pergunta de cardápio continua funcionando sem relação com horário", ()
   assert.equal(intent?.kind, "MENU");
 });
 
+test("pergunta pelo valor total é factual e não depende do provider", () => {
+  assert.equal(resolveFactualIntent({ text: "qual o valor total do meu pedido?" })?.kind, "CART_TOTAL");
+});
+
 test("mensagem sem relação com domínio não vira intenção factual nenhuma", () => {
   assert.equal(resolveFactualIntent({ text: "quero 2 brigadeiro", operatingStatus: OPEN_STATUS }), undefined);
 });

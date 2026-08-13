@@ -176,6 +176,23 @@ test("createOrder sem spy realmente cria o pedido usando a regra oficial de pre�
   assert.equal(store.orders.length, 1);
 });
 
+test("quoteCart usa a mesma regra oficial de promoção por quantidade do pedido final", () => {
+  const store = makeStore();
+  const tools = createAgentTools({ store });
+  const quote = tools.quoteCart!([{ productId: "p1", quantity: 20 }]);
+  assert.deepEqual(quote, {
+    items: [{ productId: "p1", name: "Brownie de Brigadeiro", quantity: 20, unitPrice: 3, totalPrice: 60 }],
+    subtotal: 60,
+    discount: 40,
+    total: 60,
+  });
+});
+
+test("quoteCart falha de forma segura para item indisponível", () => {
+  const tools = createAgentTools({ store: makeStore() });
+  assert.equal(tools.quoteCart!([{ productId: "nao-existe", quantity: 1 }]), null);
+});
+
 // --- getOrder ---
 
 test("getOrder retorna o pedido quando o publicCode existe", () => {

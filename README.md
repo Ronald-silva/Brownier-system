@@ -41,14 +41,17 @@ somente no `.env` local ou no provedor de deploy.
 | `BF_STORE_PATH` | Não | Caminho do armazenamento JSON local. |
 | `BF_AGENT_MAX_MISUNDERSTANDINGS` | Não | Limite de não compreensões antes do handoff; padrão `3`. |
 | `BF_SIMULATOR_DEBUG_CONTEXT` | Não | Inclui contexto de apresentação na saída do simulador. |
-| `BF_LLM_MODE` | Não | `DISABLED` (padrão), `OPENAI_FALLBACK` ou `NVIDIA_NEMOTRON`. |
+| `BF_LLM_MODE` | Não | `DISABLED` (padrão), `OPENAI_FALLBACK`, `DEEPSEEK_FALLBACK` ou `NVIDIA_NEMOTRON`. |
 | `OPENAI_*` e limites `BF_LLM_*` | Condicional | Necessários somente em `OPENAI_FALLBACK`. |
+| `DEEPSEEK_*` e limites `BF_LLM_*` | Condicional | Necessários/configuráveis somente em `DEEPSEEK_FALLBACK`; o modelo padrão é `deepseek-chat`. |
 | `NVIDIA_*` | Condicional | Necessários/configuráveis somente em `NVIDIA_NEMOTRON`. |
 | `BF_VERBALIZATION_MODE` | Não | `DISABLED` (padrão) ou `ENABLED`. Só tem efeito com `BF_LLM_MODE=NVIDIA_NEMOTRON`: liga a verbalização NVIDIA (chamada #2) do fluxo híbrido — com `DISABLED`, a resposta é sempre por template/fallback, mesmo com o restante do pipeline já ativo. |
 | `EVOLUTION_BASE_URL`, `EVOLUTION_INSTANCE_NAME`, `EVOLUTION_INSTANCE_TOKEN` | Condicional | Integração Evolution Go 0.7.2. Devem ser definidos juntos; o token é individual da instância. |
 | `EVOLUTION_WEBHOOK_TOKEN` | Sim, em produção e quando Evolution estiver configurado | Segredo exclusivo do endpoint de webhook do Brownier. |
 
 Não há integração com pagamento ou Firebase no MVP. A borda opcional de WhatsApp/Evolution Go está implementada, mas o webhook não é configurado automaticamente.
+
+Em desenvolvimento, `npm run dev` carrega automaticamente o arquivo `.env`, quando ele existe. Para usar DeepSeek, mantenha **uma única** definição de `BF_LLM_MODE=DEEPSEEK_FALLBACK`, defina `DEEPSEEK_API_KEY` e, opcionalmente, `DEEPSEEK_MODEL=deepseek-chat`. Nunca envie esse arquivo para o repositório.
 
 ### Webhook Evolution Go
 
@@ -155,7 +158,7 @@ O simulador chama `buildConversationPresentation()` seguido de `renderConversati
 
 Pontos importantes desta etapa:
 
-- **Providers reais são opcionais.** O runtime usa o SDK `openai` para `OPENAI_FALLBACK` e para o endpoint compatível do NVIDIA NIM/Nemotron em `NVIDIA_NEMOTRON`. `BF_LLM_MODE=DISABLED` é o padrão e não cria provider nem faz chamada externa. Os testes usam clientes fake locais.
+- **Providers reais são opcionais.** O runtime usa o SDK `openai` para `OPENAI_FALLBACK`, para a API compatível da DeepSeek em `DEEPSEEK_FALLBACK` e para o endpoint compatível do NVIDIA NIM/Nemotron em `NVIDIA_NEMOTRON`. `BF_LLM_MODE=DISABLED` é o padrão e não cria provider nem faz chamada externa. Os testes usam clientes fake locais.
 - **Toda saída passa por validação local antes de virar ação.** `parseLlmOutput`/`validateLlmOutput` (`src/agent/llm-output-validator.ts`) usam só `JSON.parse` (nunca `eval`/`Function`) e comparam a proposta do provider contra uma allowlist de ações e contra os dados reais de `context` — nada do que o provider afirma é aceito por si só.
 - **Somente ações já existentes no contrato real podem ser retornadas** (`AgentConversationAction`), classificadas e restritas por etapa da conversa (ex.: `CONFIRM_ORDER` só é aceito em `AWAITING_CONFIRMATION`, e nunca combinado com outras alterações no mesmo lote).
 - **Produtos, horários e formas de pagamento precisam existir no contexto público informado** — `productId`/`productName` só resolvem por correspondência exata (nunca fuzzy, nunca a primeira opção em caso de ambiguidade), `pickupTime` só aceita valores exatamente presentes em `pickupSlots` (com a única normalização seed seguro "19h" → "19:00", quando "19:00" já existe na lista), e `paymentMethod` só aceita o valor canônico de `paymentOptions`. Pedidos de entrega (`ENTREGA`/`DELIVERY`) nunca são aceitos.

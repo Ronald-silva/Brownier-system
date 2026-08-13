@@ -694,14 +694,21 @@ export function createTextConversationService(
           policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
-      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY") {
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
           ? factualIntent.address
             ? { event: "BUSINESS_ADDRESS", messageKey: "BUSINESS_ADDRESS", data: { address: factualIntent.address } }
             : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" }
-          : pickupAvailabilityPolicyResult(factualIntent.status);
+          : factualIntent.kind === "PICKUP_AVAILABILITY"
+            ? pickupAvailabilityPolicyResult(factualIntent.status)
+            : (() => {
+                const quote = tools.quoteCart?.(sessionBefore.items);
+                return quote
+                  ? { event: "CART_TOTAL", messageKey: "CART_TOTAL", data: { total: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(quote.total).replace(/\u00A0/g, " ") } }
+                  : { event: "CART_TOTAL_EMPTY", messageKey: "CART_TOTAL_EMPTY" };
+              })();
         return {
           sessionKey,
           duplicateMessage: false,

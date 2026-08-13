@@ -45,28 +45,37 @@ function buildText(messageKey: string, context: AgentPresentationContext, data: 
 
     case "ITEM_ADDED": {
       const name = context.currentProduct?.name;
-      return name
+      const base = name
         ? interpolate(MESSAGE_CATALOG.ITEM_ADDED_WITH_NAME, { quantity: d.quantity, productName: name })
         : interpolate(MESSAGE_CATALOG.ITEM_ADDED, { quantity: d.quantity });
+      return context.cartQuote ? `${base}\n\nTotal parcial: ${formatCurrency(context.cartQuote.total)}.` : base;
     }
 
     case "ITEMS_ADDED_BATCH": {
       const items = context.cartItems ?? [];
       if (items.length === 0) return MESSAGE_CATALOG.ITEM_ADDED;
       const lines = items.map(item => `${item.quantity}x ${item.name}`);
-      return interpolate(MESSAGE_CATALOG.ITEMS_ADDED_BATCH, { items: formatList(lines) });
+      const base = interpolate(MESSAGE_CATALOG.ITEMS_ADDED_BATCH, { items: formatList(lines) });
+      return context.cartQuote ? `${base}\n\nTotal parcial: ${formatCurrency(context.cartQuote.total)}.` : base;
     }
+
+    case "CART_READY":
+      return context.cartQuote
+        ? `${MESSAGE_CATALOG.CART_READY}\n\nTotal parcial: ${formatCurrency(context.cartQuote.total)}.`
+        : MESSAGE_CATALOG.CART_READY;
 
     case "ITEM_QUANTITY_UPDATED": {
       const name = context.currentProduct?.name;
-      return name
+      const base = name
         ? interpolate(MESSAGE_CATALOG.ITEM_QUANTITY_UPDATED_WITH_NAME, { quantity: d.quantity, productName: name })
         : interpolate(MESSAGE_CATALOG.ITEM_QUANTITY_UPDATED, { quantity: d.quantity });
+      return context.cartQuote ? `${base}\n\nTotal parcial: ${formatCurrency(context.cartQuote.total)}.` : base;
     }
 
     case "ITEM_REMOVED": {
       const name = context.currentProduct?.name;
-      return name ? interpolate(MESSAGE_CATALOG.ITEM_REMOVED_WITH_NAME, { productName: name }) : MESSAGE_CATALOG.ITEM_REMOVED;
+      const base = name ? interpolate(MESSAGE_CATALOG.ITEM_REMOVED_WITH_NAME, { productName: name }) : MESSAGE_CATALOG.ITEM_REMOVED;
+      return context.cartQuote ? `${base}\n\nTotal parcial: ${formatCurrency(context.cartQuote.total)}.` : base;
     }
 
     case "CUSTOMER_PHONE_SET":
@@ -129,6 +138,10 @@ function buildText(messageKey: string, context: AgentPresentationContext, data: 
       if (paymentMethod) sections.push(`Pagamento:\n${paymentMethod}`);
       if (customerName) sections.push(`Nome:\n${customerName}`);
       if (customerNotes) sections.push(`Observações:\n${customerNotes}`);
+      if (context.cartQuote) {
+        if (context.cartQuote.discount > 0) sections.push(`Desconto:\n${formatCurrency(context.cartQuote.discount)}`);
+        sections.push(`Total do pedido:\n${formatCurrency(context.cartQuote.total)}`);
+      }
       return sections.join("\n\n");
     }
 
@@ -247,6 +260,12 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
       break;
     case "BUSINESS_PICKUP_HOURS_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_PICKUP_HOURS_UNAVAILABLE;
+      break;
+    case "CART_TOTAL":
+      text = interpolate(MESSAGE_CATALOG.CART_TOTAL, { total: data?.total });
+      break;
+    case "CART_TOTAL_EMPTY":
+      text = MESSAGE_CATALOG.CART_TOTAL_EMPTY;
       break;
     default:
       text = MESSAGE_CATALOG.INVALID_ACTION;
