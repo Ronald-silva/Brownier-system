@@ -372,6 +372,11 @@ test("renderTextConversationPolicyMessage mostra a chave PIX fornecida pela loja
   assert.match(messages[0].text, /38\.011\.069\/0001-93/);
 });
 
+test("renderTextConversationPolicyMessage explica retirada quando perguntam por entrega", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "BUSINESS_DELIVERY_UNAVAILABLE" });
+  assert.match(messages[0].text, /retirada/i);
+});
+
 test("renderTextConversationPolicyMessage redireciona produto fora do cardápio sem handoff", () => {
   const messages = renderTextConversationPolicyMessage({ messageKey: "OUT_OF_SCOPE_PRODUCT" });
   assert.match(messages[0].text, /brownies/i);

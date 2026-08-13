@@ -701,7 +701,7 @@ export function createTextConversationService(
           policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
-      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE" || factualIntent?.kind === "PAYMENT_OPTIONS" || factualIntent?.kind === "PIX_KEY") {
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE" || factualIntent?.kind === "PAYMENT_OPTIONS" || factualIntent?.kind === "PIX_KEY" || factualIntent?.kind === "DELIVERY") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
@@ -720,6 +720,8 @@ export function createTextConversationService(
               ? tools.getBusinessPixKey?.()
                 ? { event: "BUSINESS_PIX_KEY", messageKey: "BUSINESS_PIX_KEY", data: { pixKey: tools.getBusinessPixKey() } }
                 : { event: "BUSINESS_PIX_KEY_UNAVAILABLE", messageKey: "BUSINESS_PIX_KEY_UNAVAILABLE" }
+            : factualIntent.kind === "DELIVERY"
+              ? { event: "BUSINESS_DELIVERY_UNAVAILABLE", messageKey: "BUSINESS_DELIVERY_UNAVAILABLE" }
             : (() => {
                 const quote = tools.quoteCart?.(sessionBefore.items);
                 return quote

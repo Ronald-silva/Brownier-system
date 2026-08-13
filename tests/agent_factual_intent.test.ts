@@ -76,6 +76,16 @@ test("pergunta pela chave PIX é factual", () => {
   assert.equal(resolveFactualIntent({ text: "qual é o pix da loja?" })?.kind, "PIX_KEY");
 });
 
+for (const text of ["faz entregas?", "tem delivery?"]) {
+  test(`pergunta de entrega é factual: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "DELIVERY");
+  });
+}
+
+test("pergunta até que horas pode retirar usa o horário real", () => {
+  assert.equal(resolveFactualIntent({ text: "até que horas eu posso ir pegar?", operatingStatus: OPEN_STATUS })?.kind, "PICKUP_AVAILABILITY");
+});
+
 test("mensagem sem relação com domínio não vira intenção factual nenhuma", () => {
   assert.equal(resolveFactualIntent({ text: "quero 2 brigadeiro", operatingStatus: OPEN_STATUS }), undefined);
 });

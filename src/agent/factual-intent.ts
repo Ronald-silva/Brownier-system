@@ -8,6 +8,7 @@ export type FactualIntent =
   | { kind: "RESPONSIBLE"; name?: string }
   | { kind: "PAYMENT_OPTIONS" }
   | { kind: "PIX_KEY" }
+  | { kind: "DELIVERY" }
   | { kind: "OUT_OF_SCOPE_PRODUCT" }
   | { kind: "MENU" };
 
@@ -58,7 +59,7 @@ export function resolveFactualIntent(input: {
     return { kind: "OUT_OF_SCOPE_PRODUCT" };
   }
 
-  const asksNow = words.has("agora") || words.has("hoje") || words.has("horario");
+  const asksNow = words.has("agora") || words.has("hoje") || words.has("horario") || (words.has("ate") && words.has("horas"));
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };
@@ -77,6 +78,10 @@ export function resolveFactualIntent(input: {
 
   if (words.has("pix") && (words.has("chave") || words.has("qual") || words.has("codigo"))) {
     return { kind: "PIX_KEY" };
+  }
+
+  if (words.has("entrega") || words.has("entregas") || words.has("delivery") || (words.has("manda") && words.has("entregar"))) {
+    return { kind: "DELIVERY" };
   }
 
   if (words.has("cartao") || words.has("cartoes") || words.has("pagamento") || words.has("pagar") || words.has("aceita")) {

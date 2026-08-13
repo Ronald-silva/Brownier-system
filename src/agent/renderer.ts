@@ -285,6 +285,9 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_PIX_KEY_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_PIX_KEY_UNAVAILABLE;
       break;
+    case "BUSINESS_DELIVERY_UNAVAILABLE":
+      text = MESSAGE_CATALOG.BUSINESS_DELIVERY_UNAVAILABLE;
+      break;
     case "HUMAN_HANDOFF_CONFIRMATION_REQUIRED":
       text = MESSAGE_CATALOG.HUMAN_HANDOFF_CONFIRMATION_REQUIRED;
       break;

@@ -171,6 +171,7 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   BUSINESS_PAYMENT_OPTIONS: "No momento, as formas de pagamento disponíveis são:\n\n{options}",
   BUSINESS_PIX_KEY: "A chave PIX da loja é:\n\n{pixKey}",
   BUSINESS_PIX_KEY_UNAVAILABLE: "A chave PIX ainda não está cadastrada aqui. Posso seguir com seu pedido e o Mateus confirma o pagamento com você.",
+  BUSINESS_DELIVERY_UNAVAILABLE: "No momento, os pedidos são para retirada no local. Você pode buscar pessoalmente ou enviar um Uber Moto por sua conta.",
   HUMAN_HANDOFF_CONFIRMATION_REQUIRED: "Posso ajudar você por aqui com cardápio, valores, pedido, horário e endereço. Se quiser mesmo falar com alguém, escreva “atendente”.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 
