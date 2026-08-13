@@ -173,7 +173,7 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   // planejamento (ConversationIntent) — nunca mudam de assunto nem empurram
   // o pedido automaticamente. Usados como TEMPLATE por padrão e como
   // fallbackMessageKey quando a verbalização está habilitada mas falha.
-  SOCIAL_ACKNOWLEDGED: "Fico à disposição! Posso ajudar com mais alguma coisa?",
+  SOCIAL_ACKNOWLEDGED: "Que bom falar com você 😊 Quando quiser, posso mostrar o cardápio, informar valores ou montar seu pedido.",
   OBJECTION_ACKNOWLEDGED: "Entendo a preocupação com o valor. Posso ajudar com mais alguma dúvida sobre os itens?",
   OUT_OF_SCOPE_DECLINED:
     "Isso foge um pouco do que consigo ajudar por aqui. Posso ajudar com o cardápio, com o seu pedido ou com informações da loja.",

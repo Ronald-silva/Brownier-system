@@ -38,9 +38,15 @@ test("pergunta de cardápio continua funcionando sem relação com horário", ()
   assert.equal(intent?.kind, "MENU");
 });
 
-for (const text of ["quanto é o dindin?", "qual o preço?", "tem bolo?", "tem paçoca?"]) {
-  test(`pergunta coloquial de preço ou disponibilidade mostra o cardápio real: "${text}"`, () => {
+for (const text of ["quanto é o dindin?", "qual o preço?"]) {
+  test(`pergunta coloquial de preço mostra o cardápio real: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text })?.kind, "MENU");
+  });
+}
+
+for (const text of ["tem bolo?", "tem água?", "tem paçoca?"]) {
+  test(`pergunta por produto específico é encaminhada ao catálogo do modelo: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text }), undefined);
   });
 }
 

@@ -332,10 +332,10 @@ test("a batch with one invalid action is rejected entirely", async () => {
   assert.equal(result.status, "REJECTED");
 });
 
-test("more than five actions is rejected", async () => {
+test("more than twelve actions is rejected", async () => {
   const provider = fixedProvider({
     status: "MATCHED",
-    actions: Array.from({ length: 6 }, () => ({ type: "ADD_ITEM", productId: "p1", quantity: 1 })),
+    actions: Array.from({ length: 13 }, () => ({ type: "ADD_ITEM", productId: "p1", quantity: 1 })),
   });
   const interpreter = createLlmInterpreter({ provider });
   const result = await interpreter.interpret({

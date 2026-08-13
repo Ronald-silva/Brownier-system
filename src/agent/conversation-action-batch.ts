@@ -16,7 +16,7 @@ import {
   type AgentConversationServiceResult,
 } from "./conversation.service.ts";
 
-export const MAX_BATCH_ACTIONS = 5;
+export const MAX_BATCH_ACTIONS = 12;
 
 // Ações que só fazem sentido sozinhas numa mensagem: confirmar pedido,
 // pedir humano, resetar ou cancelar a conversa. O llm-output-validator.ts já

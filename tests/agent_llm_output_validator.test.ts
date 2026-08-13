@@ -118,9 +118,9 @@ test("NOT_UNDERSTOOD with actions present is rejected", () => {
   assert.deepEqual(result, { status: "REJECTED", reason: "ACTIONS_NOT_ALLOWED" });
 });
 
-test("more than 5 actions is rejected", () => {
+test("more than 12 actions is rejected", () => {
   const session = atStep("BUILDING_ORDER");
-  const actions = Array.from({ length: 6 }, () => ({ type: "ADD_ITEM", productId: "p1", quantity: 1 }));
+  const actions = Array.from({ length: 13 }, () => ({ type: "ADD_ITEM", productId: "p1", quantity: 1 }));
   const result = validate({ status: "MATCHED", actions }, session, PRODUCTS_CONTEXT);
   assert.deepEqual(result, { status: "REJECTED", reason: "TOO_MANY_ACTIONS" });
 });

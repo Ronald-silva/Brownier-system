@@ -68,14 +68,12 @@ export function resolveFactualIntent(input: {
     return { kind: "CART_TOTAL" };
   }
 
-  // Perguntas coloquiais sobre preço e disponibilidade devem sempre levar ao
-  // cardápio real. Assim "quanto é o dindin?", "tem bolo?" ou "vende
-  // paçoca?" recebem uma resposta útil e não consomem tentativas até o
-  // handoff. O catálogo continua sendo a fonte de verdade: não afirmamos
-  // que um item inexistente está disponível.
+  // Perguntas gerais sobre preço levam ao cardápio real. Perguntas por um
+  // item específico ("tem água?", "vende bolo?") seguem para o modelo, que
+  // compara o item com o catálogo público e responde sem afirmar uma
+  // disponibilidade que não existe.
   const asksPrice = words.has("preco") || words.has("precos") || words.has("dindin");
-  const asksAvailability = (words.has("tem") || words.has("vende") || words.has("vendem")) && words.size <= 4;
-  if (words.has("menu") || words.has("cardapio") || words.has("sabores") || words.has("preco") || words.has("precos") || asksPrice || asksAvailability) {
+  if (words.has("menu") || words.has("cardapio") || words.has("sabores") || words.has("preco") || words.has("precos") || asksPrice) {
     return { kind: "MENU" };
   }
   return undefined;

@@ -15,7 +15,7 @@ const CUSTOMER_NAME_MAX_LENGTH = 120;
 const CUSTOMER_PHONE_MAX_LENGTH = 30;
 const CUSTOMER_NOTES_MAX_LENGTH = 500;
 const ITEM_QUANTITY_MAX = 100;
-const MAX_ACTIONS = 5;
+const MAX_ACTIONS = 12;
 
 // Limites sem contraparte numérica no validator (que só compara contra
 // listas de valores existentes) — escolhidos como um teto de formato

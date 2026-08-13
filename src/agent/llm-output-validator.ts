@@ -12,7 +12,7 @@ import type { LlmInterpreterContext, LlmInterpreterPublicProduct } from "./llm-i
 import type { AllowedFactKey, ConversationIntent, ResponseIntent } from "./conversation-intelligence.types.ts";
 
 export const DEFAULT_MAX_OUTPUT_LENGTH = 20_000;
-const MAX_ACTIONS_PER_MESSAGE = 5;
+const MAX_ACTIONS_PER_MESSAGE = 12;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
 const MAX_CUSTOMER_NOTES_LENGTH = 500;
 const MAX_PHONE_LENGTH = 30;
