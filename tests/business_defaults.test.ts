@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWNIER_PAYMENT_METHODS, BROWNIER_PICKUP_ADDRESS, BROWNIER_PIX_KEY, BROWNIER_RESPONSIBLE_NAME, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible } from "../src/lib/business-defaults.ts";
+import { BROWNIER_PAYMENT_METHODS, BROWNIER_PICKUP_ADDRESS, BROWNIER_PIX_KEY, BROWNIER_RESPONSIBLE_NAME, BROWNIER_WHATSAPP, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible, ensureBrownierWhatsapp } from "../src/lib/business-defaults.ts";
 import { INITIAL_OPERATING_HOURS } from "../src/lib/business-hours.ts";
 
 test("a semente comercial usa o endereço oficial de retirada", () => {
@@ -40,6 +40,13 @@ test("backfill cadastra a chave PIX comercial oficial", () => {
   assert.equal(BROWNIER_PIX_KEY, "38.011.069/0001-93");
   assert.equal(result.business.pixKey, BROWNIER_PIX_KEY);
   assert.equal(store.business.pixKey, undefined);
+});
+
+test("backfill cadastra o WhatsApp oficial", () => {
+  const store: { business: Record<string, unknown>; products: unknown[]; orders: unknown[] } = { business: { whatsapp: "" }, products: [], orders: [] };
+  const result = ensureBrownierWhatsapp(store);
+  assert.equal(result.business.whatsapp, BROWNIER_WHATSAPP);
+  assert.equal(ensureBrownierWhatsapp(result), result);
 });
 
 test("backfill mantém somente PIX e dinheiro como formas aceitas", () => {

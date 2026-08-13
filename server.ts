@@ -8,7 +8,7 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool, getDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
-import { BROWNIER_PICKUP_ADDRESS, BROWNIER_PAYMENT_METHODS, BROWNIER_PIX_KEY, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible } from "./src/lib/business-defaults.ts";
+import { BROWNIER_PICKUP_ADDRESS, BROWNIER_PAYMENT_METHODS, BROWNIER_PIX_KEY, BROWNIER_WHATSAPP, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible, ensureBrownierWhatsapp } from "./src/lib/business-defaults.ts";
 import { validateStructuredWeeklyHours } from "./src/lib/business-hours.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
 import { createPostgresConversationState } from "./src/agent/postgres-conversation-state.ts";
@@ -98,7 +98,7 @@ function verifyAdminSessionToken(token: string | undefined): boolean {
 const demoStore: Store = {
   business: {
     name: "Brownieria Fortal", tagline: "Brownies artesanais para tornar seu dia mais doce", description: "Veja os sabores disponíveis hoje e monte seu pedido em poucos minutos.",
-    phone: "", whatsapp: "", address: BROWNIER_PICKUP_ADDRESS, hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
+    phone: "", whatsapp: BROWNIER_WHATSAPP, address: BROWNIER_PICKUP_ADDRESS, hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
     pickupSlots: [],
     paymentMethods: [...BROWNIER_PAYMENT_METHODS], deliveryFee: 0,
     pixKey: BROWNIER_PIX_KEY,
@@ -128,7 +128,8 @@ async function loadStore(): Promise<Store> {
   const withOperatingHours = ensureBrownierOperatingHours(withOfficialAddress);
   const withResponsible = ensureBrownierResponsible(withOperatingHours);
   const withPixKey = ensureBrownierPixKey(withResponsible);
-  const withPaymentMethods = ensureBrownierPaymentMethods(withPixKey);
+  const withWhatsapp = ensureBrownierWhatsapp(withPixKey);
+  const withPaymentMethods = ensureBrownierPaymentMethods(withWhatsapp);
   if (withPaymentMethods !== store) await saveStore(withPaymentMethods);
   return withPaymentMethods;
 }

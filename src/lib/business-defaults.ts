@@ -3,6 +3,7 @@ import { INITIAL_OPERATING_HOURS, isStructuredWeeklyHours } from "./business-hou
 export const BROWNIER_PICKUP_ADDRESS = "Rua Professor Leite Gondim, 896, Antônio Bezerra, Fortaleza – CE, CEP 60360-332";
 export const BROWNIER_RESPONSIBLE_NAME = "Mateus";
 export const BROWNIER_PIX_KEY = "38.011.069/0001-93";
+export const BROWNIER_WHATSAPP = "+55 85 9145-7889";
 export const BROWNIER_PAYMENT_METHODS = ["PIX", "DINHEIRO"] as const;
 
 type StoreWithBusiness = { business: Record<string, unknown> };
@@ -34,6 +35,13 @@ export function ensureBrownierResponsible<T extends StoreWithBusiness>(store: T)
 export function ensureBrownierPixKey<T extends StoreWithBusiness>(store: T): T {
   if (store.business.pixKey === BROWNIER_PIX_KEY) return store;
   return { ...store, business: { ...store.business, pixKey: BROWNIER_PIX_KEY } };
+}
+
+// Canal oficial para comprovantes e dúvidas. O backfill mantém o contato
+// disponível tanto para o link público do site quanto para o agente.
+export function ensureBrownierWhatsapp<T extends StoreWithBusiness>(store: T): T {
+  if (store.business.whatsapp === BROWNIER_WHATSAPP) return store;
+  return { ...store, business: { ...store.business, whatsapp: BROWNIER_WHATSAPP } };
 }
 
 export function ensureBrownierPaymentMethods<T extends StoreWithBusiness>(store: T): T {
