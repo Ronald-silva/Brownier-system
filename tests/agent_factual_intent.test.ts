@@ -14,7 +14,7 @@ const OPEN_STATUS: OperatingStatus = {
   closedReason: null,
 };
 
-for (const text of ["Vocês estão abertos?", "Posso retirar pedido agora?", "Que horas vocês abrem?", "Posso buscar hoje?", "Posso pegar agora?"]) {
+for (const text of ["Vocês estão abertos?", "Posso retirar pedido agora?", "Que horas vocês abrem?", "Posso buscar hoje?", "Posso pegar agora?", "Posso ir pegar aggora?"]) {
   test(`reconhece pergunta de horário: "${text}"`, () => {
     const intent = resolveFactualIntent({ text, operatingStatus: OPEN_STATUS });
     assert.equal(intent?.kind, "PICKUP_AVAILABILITY");
@@ -98,7 +98,7 @@ test("pergunta sobre comprovante de PIX não depende do modelo", () => {
   assert.equal(resolveFactualIntent({ text: "onde mando o comprovante?" })?.kind, "PAYMENT_PROOF");
 });
 
-for (const text of ["qual o WhatsApp?", "me manda o link do zap"]) {
+for (const text of ["qual o WhatsApp?", "me manda o link do zap", "manda o link"]) {
   test(`pedido de contato do WhatsApp é factual: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text })?.kind, "WHATSAPP_CONTACT");
   });

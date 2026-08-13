@@ -75,12 +75,15 @@ export function resolveFactualIntent(input: {
     return { kind: "OUT_OF_SCOPE_PRODUCT" };
   }
 
-  const asksNow = words.has("agora") || words.has("hoje") || words.has("horario") || (words.has("ate") && words.has("horas"));
+  // Aceita repetição acidental de letra comum em teclado móvel: "aggora".
+  const asksNow = words.has("agora") || [...words].some(word => /^ag+ora$/.test(word)) || words.has("hoje") || words.has("horario") || (words.has("ate") && words.has("horas"));
   const asksWeekend = (words.has("fim") || words.has("finais")) && words.has("semana");
   const asksSchedule = (words.has("horario") && (words.has("funcionamento") || words.has("funciona"))) || asksWeekend;
   if (asksSchedule) return { kind: "OPERATING_HOURS" };
   if (words.has("comprovante")) return { kind: "PAYMENT_PROOF" };
-  if (words.has("whatsapp") || words.has("zap")) return { kind: "WHATSAPP_CONTACT" };
+  // No atendimento da Brownieria não há outro link operacional. Depois da
+  // instrução de PIX, "manda o link" é a forma natural de pedir o WhatsApp.
+  if (words.has("whatsapp") || words.has("zap") || (words.has("manda") && words.has("link"))) return { kind: "WHATSAPP_CONTACT" };
   // "amanhã dá certo?" é uma pergunta de horário/disponibilidade, mesmo
   // sem repetir a palavra retirada. A agenda completa é preferível a uma
   // resposta vaga ou a uma previsão inventada pelo modelo.
