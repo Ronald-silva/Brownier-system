@@ -5,6 +5,7 @@ export type FactualIntent =
   | { kind: "ADDRESS"; address?: string }
   | { kind: "PICKUP_AVAILABILITY"; status: OperatingStatus }
   | { kind: "CART_TOTAL" }
+  | { kind: "RESPONSIBLE"; name?: string }
   | { kind: "OUT_OF_SCOPE_PRODUCT" }
   | { kind: "MENU" };
 
@@ -66,6 +67,10 @@ export function resolveFactualIntent(input: {
   // menu nem depender de uma chamada ao modelo.
   if (words.has("total") || words.has("subtotal")) {
     return { kind: "CART_TOTAL" };
+  }
+
+  if (words.has("responsavel") || (words.has("quem") && (words.has("fala") || words.has("falo")))) {
+    return { kind: "RESPONSIBLE" };
   }
 
   // Perguntas gerais sobre preço levam ao cardápio real. Perguntas por um

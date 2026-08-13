@@ -359,7 +359,7 @@ test("renderTextConversationPolicyMessage informa o total sem depender do LLM", 
 test("renderTextConversationPolicyMessage redireciona produto fora do cardápio sem handoff", () => {
   const messages = renderTextConversationPolicyMessage({ messageKey: "OUT_OF_SCOPE_PRODUCT" });
   assert.match(messages[0].text, /brownies/i);
-  assert.match(messages[0].text, /não com produtos por quilo/i);
+  assert.match(messages[0].text, /não encontrei esse item/i);
 });
 
 test("Renderer não importa Agent Tools", async () => {

@@ -253,6 +253,13 @@ function publicSuggestions(suggestions: string[] | undefined): string[] {
   return out;
 }
 
+function explicitlyRequestsHuman(text: string): boolean {
+  return new Set([
+    "atendente", "atendimento humano", "falar com atendente",
+    "falar com uma pessoa", "humano", "suporte",
+  ]).has(normalizeInterpreterText(text));
+}
+
 // O LLM Interpreter e o Output Validator carregam campos nunca pensados para
 // sair do processo: o `reason` de um resultado REJECTED traz motivos
 // técnicos internos de validação (ação proibida, produto/horário/pagamento
@@ -694,7 +701,7 @@ export function createTextConversationService(
           policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
-      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT") {
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
@@ -703,8 +710,10 @@ export function createTextConversationService(
             : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" }
           : factualIntent.kind === "PICKUP_AVAILABILITY"
             ? pickupAvailabilityPolicyResult(factualIntent.status)
-            : factualIntent.kind === "OUT_OF_SCOPE_PRODUCT"
+          : factualIntent.kind === "OUT_OF_SCOPE_PRODUCT"
               ? { event: "OUT_OF_SCOPE_PRODUCT", messageKey: "OUT_OF_SCOPE_PRODUCT" }
+            : factualIntent.kind === "RESPONSIBLE"
+              ? { event: "BUSINESS_RESPONSIBLE", messageKey: "BUSINESS_RESPONSIBLE", data: { name: tools.getBusinessResponsible?.() || "Mateus" } }
             : (() => {
                 const quote = tools.quoteCart?.(sessionBefore.items);
                 return quote
@@ -1108,6 +1117,23 @@ export function createTextConversationService(
         const currentShortHistory = appendShortHistory(sessionBefore.shortHistory, { role: "customer", text, at: now().toISOString() });
 
         if (intent === "REQUEST_HUMAN") {
+          // Só uma solicitação inequívoca pode bloquear o atendimento. Isso
+          // evita que perguntas como "com quem eu falo?" virem transferência.
+          if (!explicitlyRequestsHuman(text)) {
+            if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
+            const sessionAfterUnchanged = structuredClone(sessionStore.get(sessionKey)!);
+            const policyResult: TextConversationPolicyResult = {
+              event: "HUMAN_HANDOFF_CONFIRMATION_REQUIRED",
+              messageKey: "HUMAN_HANDOFF_CONFIRMATION_REQUIRED",
+            };
+            return {
+              sessionKey, duplicateMessage: false,
+              interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "POLICY" },
+              sessionBefore, sessionAfter: sessionAfterUnchanged, policyResult,
+              messages: renderTextConversationPolicyMessage(policyResult),
+              policy: { misunderstandingCountBefore, misunderstandingCountAfter: misunderstandingCountBefore, handoffTriggered: false, counterReset: false },
+            };
+          }
           const { engineResult, sessionAfter: handoffSessionAfter, counterReset } = applySingleAction({
             conversationService, sessionStore, channel, contactId, messageId, sessionKey, action: { type: "REQUEST_HUMAN" },
           });

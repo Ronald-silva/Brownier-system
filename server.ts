@@ -8,7 +8,7 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool, getDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
-import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress, ensureBrownierOperatingHours } from "./src/lib/business-defaults.ts";
+import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierResponsible } from "./src/lib/business-defaults.ts";
 import { validateStructuredWeeklyHours } from "./src/lib/business-hours.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
 import { createPostgresConversationState } from "./src/agent/postgres-conversation-state.ts";
@@ -125,8 +125,9 @@ async function loadStore(): Promise<Store> {
   const store = await loadStoreFile(storePath, () => demoStore);
   const withOfficialAddress = ensureBrownierPickupAddress(store);
   const withOperatingHours = ensureBrownierOperatingHours(withOfficialAddress);
-  if (withOperatingHours !== store) await saveStore(withOperatingHours);
-  return withOperatingHours;
+  const withResponsible = ensureBrownierResponsible(withOperatingHours);
+  if (withResponsible !== store) await saveStore(withResponsible);
+  return withResponsible;
 }
 async function saveStore(store: Store) { return saveStoreFile(storePath, store); }
 function publicProduct(product: Product) {

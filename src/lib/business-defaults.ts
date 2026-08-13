@@ -1,6 +1,7 @@
 import { INITIAL_OPERATING_HOURS, isStructuredWeeklyHours } from "./business-hours.ts";
 
 export const BROWNIER_PICKUP_ADDRESS = "Rua Professor Leite Gondim, 896, Antônio Bezerra, Fortaleza – CE, CEP 60360-332";
+export const BROWNIER_RESPONSIBLE_NAME = "Mateus";
 
 type StoreWithBusiness = { business: Record<string, unknown> };
 
@@ -16,6 +17,13 @@ export function ensureBrownierPickupAddress<T extends StoreWithBusiness>(store: 
       address: BROWNIER_PICKUP_ADDRESS,
     },
   };
+}
+
+// Fato comercial confirmado pelo responsável. Mantido no Store para que o
+// agente responda de modo determinístico, inclusive em instalações antigas.
+export function ensureBrownierResponsible<T extends StoreWithBusiness>(store: T): T {
+  if (store.business.responsibleName === BROWNIER_RESPONSIBLE_NAME) return store;
+  return { ...store, business: { ...store.business, responsibleName: BROWNIER_RESPONSIBLE_NAME } };
 }
 
 // Backfill idempotente do horário estruturado: só preenche quando

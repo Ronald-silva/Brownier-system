@@ -273,6 +273,12 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "CART_TOTAL_EMPTY":
       text = MESSAGE_CATALOG.CART_TOTAL_EMPTY;
       break;
+    case "BUSINESS_RESPONSIBLE":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_RESPONSIBLE, { name: data?.name });
+      break;
+    case "HUMAN_HANDOFF_CONFIRMATION_REQUIRED":
+      text = MESSAGE_CATALOG.HUMAN_HANDOFF_CONFIRMATION_REQUIRED;
+      break;
     default:
       text = MESSAGE_CATALOG.INVALID_ACTION;
   }

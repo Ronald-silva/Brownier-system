@@ -167,6 +167,8 @@ export const MESSAGE_CATALOG: Record<string, string> = {
     "Não encontrei esse item no cardápio de hoje. Aqui trabalhamos com brownies 😊 Posso mostrar os sabores e valores disponíveis ou ajudar a montar seu pedido.",
   CART_TOTAL: "O total atual do seu pedido é {total}.",
   CART_TOTAL_EMPTY: "Seu carrinho ainda está vazio. Posso mostrar o cardápio para você escolher seus brownies.",
+  BUSINESS_RESPONSIBLE: "O responsável pela Brownieria é {name}. Posso ajudar você com o cardápio, valores ou pedido por aqui.",
+  HUMAN_HANDOFF_CONFIRMATION_REQUIRED: "Posso ajudar você por aqui com cardápio, valores, pedido, horário e endereço. Se quiser mesmo falar com alguém, escreva “atendente”.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 
   // Reconhecimento de intenções não-transacionais identificadas pelo

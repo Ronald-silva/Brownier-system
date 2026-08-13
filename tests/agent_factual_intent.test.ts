@@ -60,6 +60,12 @@ test("pergunta pelo valor total é factual e não depende do provider", () => {
   assert.equal(resolveFactualIntent({ text: "qual o valor total do meu pedido?" })?.kind, "CART_TOTAL");
 });
 
+for (const text of ["quem é o responsável?", "com quem eu falo?"]) {
+  test(`pergunta pelo responsável é factual: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "RESPONSIBLE");
+  });
+}
+
 test("mensagem sem relação com domínio não vira intenção factual nenhuma", () => {
   assert.equal(resolveFactualIntent({ text: "quero 2 brigadeiro", operatingStatus: OPEN_STATUS }), undefined);
 });
