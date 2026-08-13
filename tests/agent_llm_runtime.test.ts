@@ -5,6 +5,8 @@ import { LlmRuntimeConfigError } from "../src/agent/llm-runtime-config.ts";
 import type { OpenAiResponsesClient } from "../src/agent/providers/openai-llm-provider.ts";
 import { NvidiaNemotronLlmProviderError } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
 import type { NvidiaCompatibleClient } from "../src/agent/providers/nvidia-nemotron-llm-provider.ts";
+import { DeepseekLlmProviderError } from "../src/agent/providers/deepseek-llm-provider.ts";
+import type { DeepseekCompatibleClient } from "../src/agent/providers/deepseek-llm-provider.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -23,6 +25,14 @@ function validNvidiaEnv(overrides: Env = {}): Env {
     NVIDIA_API_KEY: "nvapi-test-not-a-real-key",
     NVIDIA_MODEL: "nvidia/test-model",
     NVIDIA_BASE_URL: "https://nvidia.example.com/v1",
+    ...overrides,
+  };
+}
+
+function validDeepseekEnv(overrides: Env = {}): Env {
+  return {
+    BF_LLM_MODE: "DEEPSEEK_FALLBACK",
+    DEEPSEEK_API_KEY: "sk-deepseek-test-not-a-real-key",
     ...overrides,
   };
 }
@@ -67,6 +77,22 @@ class ThrowingFakeNvidiaClient implements NvidiaCompatibleClient {
         create: async (params: Record<string, unknown>) => {
           this.calls.push(params);
           throw error;
+        },
+      },
+    };
+  }
+}
+
+class FakeDeepseekClient implements DeepseekCompatibleClient {
+  calls: Record<string, unknown>[] = [];
+  chat: DeepseekCompatibleClient["chat"];
+
+  constructor(outputText: string) {
+    this.chat = {
+      completions: {
+        create: async (params: Record<string, unknown>) => {
+          this.calls.push(params);
+          return { choices: [{ message: { content: outputText } }] };
         },
       },
     };
@@ -333,4 +359,109 @@ test("erro do provider NVIDIA é preservado como PROVIDER_ERROR pelo llmInterpre
 test("NVIDIA_NEMOTRON sem nvidiaClient injetado ainda resolve o runtime (cliente oficial só seria usado em chamada real)", () => {
   const runtime = resolveLlmRuntime({ env: validNvidiaEnv() });
   assert.equal(runtime.llmMode, "NVIDIA_NEMOTRON");
+});
+
+// --- DEEPSEEK_FALLBACK -------------------------------------------------
+
+test("DEEPSEEK_FALLBACK válido resolve para FALLBACK com um llmInterpreter", () => {
+  const client = new FakeDeepseekClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":null,"suggestions":[]}');
+  const runtime = resolveLlmRuntime({ env: validDeepseekEnv(), deepseekClient: client });
+  assert.equal(runtime.llmMode, "FALLBACK");
+  assert.equal(typeof (runtime as { llmInterpreter: { interpret: unknown } }).llmInterpreter.interpret, "function");
+});
+
+test("DEEPSEEK_FALLBACK sem chave lança LlmRuntimeConfigError antes de criar qualquer provider", () => {
+  const client = new FakeDeepseekClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":null,"suggestions":[]}');
+  assert.throws(
+    () => resolveLlmRuntime({ env: validDeepseekEnv({ DEEPSEEK_API_KEY: undefined }), deepseekClient: client }),
+    (error: unknown) => {
+      assert.ok(error instanceof LlmRuntimeConfigError);
+      assert.equal(error.code, "MISSING_DEEPSEEK_API_KEY");
+      return true;
+    },
+  );
+  assert.equal(client.calls.length, 0);
+});
+
+test("DEEPSEEK_FALLBACK sem modelo usa o padrão deepseek-chat, não lança erro", () => {
+  const client = new FakeDeepseekClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":null,"suggestions":[]}');
+  const runtime = resolveLlmRuntime({ env: validDeepseekEnv({ DEEPSEEK_MODEL: undefined }), deepseekClient: client });
+  assert.equal(runtime.llmMode, "FALLBACK");
+});
+
+test("DEEPSEEK_FALLBACK repassa o modelo customizado ao provider", async () => {
+  const client = new FakeDeepseekClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const runtime = resolveLlmRuntime({ env: validDeepseekEnv({ DEEPSEEK_MODEL: "deepseek-reasoner" }), deepseekClient: client });
+  if (runtime.llmMode !== "FALLBACK") throw new Error("unreachable");
+
+  await runtime.llmInterpreter.interpret({ text: "oi", session: buildSession() });
+
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0]!["model"], "deepseek-reasoner");
+});
+
+test("DEEPSEEK_FALLBACK repassa BF_LLM_MAX_REQUESTS_PER_MINUTE ao provider", async () => {
+  let now = 0;
+  const originalNow = Date.now;
+  Date.now = () => now;
+  try {
+    const client = new FakeDeepseekClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+    const runtime = resolveLlmRuntime({ env: validDeepseekEnv({ BF_LLM_MAX_REQUESTS_PER_MINUTE: "1" }), deepseekClient: client });
+    if (runtime.llmMode !== "FALLBACK") throw new Error("unreachable");
+
+    await runtime.llmInterpreter.interpret({ text: "1", session: buildSession() });
+    const second = await runtime.llmInterpreter.interpret({ text: "2", session: buildSession() });
+
+    assert.equal(second.status, "PROVIDER_ERROR");
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("DEEPSEEK_FALLBACK com limite inválido lança LlmRuntimeConfigError vinda de readLlmRuntimeConfig", () => {
+  assert.throws(
+    () => resolveLlmRuntime({ env: validDeepseekEnv({ BF_LLM_MAX_REQUESTS_PER_MINUTE: "0" }) }),
+    (error: unknown) => {
+      assert.ok(error instanceof LlmRuntimeConfigError);
+      assert.equal(error.code, "INVALID_LLM_MAX_REQUESTS_PER_MINUTE");
+      return true;
+    },
+  );
+});
+
+test("DEEPSEEK_FALLBACK usa somente deepseekClient, nunca nvidiaClient nem openAiClient", async () => {
+  const deepseekClient = new FakeDeepseekClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const nvidiaClient = new FakeNvidiaClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":"GENERIC","suggestions":[]}');
+  const openAiClient = new FakeOpenAiClient('{"status":"NOT_UNDERSTOOD","actions":[],"reason":null,"suggestions":[]}');
+  const runtime = resolveLlmRuntime({ env: validDeepseekEnv(), deepseekClient, nvidiaClient, openAiClient });
+  if (runtime.llmMode !== "FALLBACK") throw new Error("unreachable");
+
+  await runtime.llmInterpreter.interpret({ text: "oi", session: buildSession() });
+
+  assert.equal(deepseekClient.calls.length, 1);
+  assert.equal(nvidiaClient.calls.length, 0);
+  assert.equal(openAiClient.calls.length, 0);
+});
+
+test("erro do provider DeepSeek é preservado como PROVIDER_ERROR pelo llmInterpreter", async () => {
+  const throwingClient: DeepseekCompatibleClient = {
+    chat: {
+      completions: {
+        create: async () => {
+          throw new DeepseekLlmProviderError("DEEPSEEK_UNKNOWN", false);
+        },
+      },
+    },
+  };
+  const runtime = resolveLlmRuntime({ env: validDeepseekEnv(), deepseekClient: throwingClient });
+  if (runtime.llmMode !== "FALLBACK") throw new Error("unreachable");
+
+  const result = await runtime.llmInterpreter.interpret({ text: "oi", session: buildSession() });
+
+  assert.equal(result.status, "PROVIDER_ERROR");
+});
+
+test("DEEPSEEK_FALLBACK sem deepseekClient injetado ainda resolve o runtime (cliente oficial só seria usado em chamada real)", () => {
+  const runtime = resolveLlmRuntime({ env: validDeepseekEnv() });
+  assert.equal(runtime.llmMode, "FALLBACK");
 });

@@ -15,6 +15,13 @@ export type LlmRuntimeConfig =
       maxConcurrentRequests: number;
     }
   | {
+      mode: "DEEPSEEK_FALLBACK";
+      deepseekApiKey: string;
+      deepseekModel: string;
+      maxRequestsPerMinute: number;
+      maxConcurrentRequests: number;
+    }
+  | {
       mode: "NVIDIA_NEMOTRON";
       nvidiaApiKey: string;
       nvidiaModel: string;
@@ -33,6 +40,8 @@ export type LlmRuntimeConfigErrorCode =
   | "MISSING_OPENAI_API_KEY"
   | "MISSING_OPENAI_MODEL"
   | "INVALID_OPENAI_MODEL"
+  | "MISSING_DEEPSEEK_API_KEY"
+  | "INVALID_DEEPSEEK_MODEL"
   | "INVALID_LLM_MAX_REQUESTS_PER_MINUTE"
   | "INVALID_LLM_MAX_CONCURRENT_REQUESTS"
   | "MISSING_NVIDIA_API_KEY"
@@ -53,6 +62,7 @@ export class LlmRuntimeConfigError extends Error {
 }
 
 const MAX_OPENAI_MODEL_LENGTH = 200;
+const MAX_DEEPSEEK_MODEL_LENGTH = 200;
 
 const DEFAULT_MAX_REQUESTS_PER_MINUTE = 30;
 const MAX_REQUESTS_PER_MINUTE_CEILING = 600;
@@ -62,6 +72,7 @@ const MAX_CONCURRENT_REQUESTS_CEILING = 20;
 
 const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const DEFAULT_DEEPSEEK_MODEL = "deepseek-chat";
 
 function trimOrEmpty(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
@@ -159,8 +170,39 @@ export function readLlmRuntimeConfig(env: Record<string, string | undefined>): L
     const verbalizationMode = readVerbalizationMode(env.BF_VERBALIZATION_MODE);
     return { mode: "NVIDIA_NEMOTRON", nvidiaApiKey, nvidiaModel, nvidiaBaseUrl, maxRequestsPerMinute, maxConcurrentRequests, verbalizationMode };
   }
-  if (mode !== "OPENAI_FALLBACK") {
+  if (mode !== "OPENAI_FALLBACK" && mode !== "DEEPSEEK_FALLBACK") {
     throw new LlmRuntimeConfigError("INVALID_LLM_MODE", "BF_LLM_MODE contém um valor não reconhecido");
+  }
+
+  if (mode === "DEEPSEEK_FALLBACK") {
+    const deepseekApiKey = trimOrEmpty(env.DEEPSEEK_API_KEY);
+    if (deepseekApiKey === "") {
+      throw new LlmRuntimeConfigError("MISSING_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY é obrigatória quando BF_LLM_MODE=DEEPSEEK_FALLBACK");
+    }
+
+    const deepseekModelRaw = trimOrEmpty(env.DEEPSEEK_MODEL);
+    const deepseekModel = deepseekModelRaw === "" ? DEFAULT_DEEPSEEK_MODEL : deepseekModelRaw;
+    if (deepseekModel.length > MAX_DEEPSEEK_MODEL_LENGTH) {
+      throw new LlmRuntimeConfigError("INVALID_DEEPSEEK_MODEL", `DEEPSEEK_MODEL excede o tamanho máximo de ${MAX_DEEPSEEK_MODEL_LENGTH} caracteres`);
+    }
+
+    const maxRequestsPerMinute = readBoundedInteger(
+      env.BF_LLM_MAX_REQUESTS_PER_MINUTE,
+      DEFAULT_MAX_REQUESTS_PER_MINUTE,
+      MAX_REQUESTS_PER_MINUTE_CEILING,
+      "INVALID_LLM_MAX_REQUESTS_PER_MINUTE",
+      "BF_LLM_MAX_REQUESTS_PER_MINUTE",
+    );
+
+    const maxConcurrentRequests = readBoundedInteger(
+      env.BF_LLM_MAX_CONCURRENT_REQUESTS,
+      DEFAULT_MAX_CONCURRENT_REQUESTS,
+      MAX_CONCURRENT_REQUESTS_CEILING,
+      "INVALID_LLM_MAX_CONCURRENT_REQUESTS",
+      "BF_LLM_MAX_CONCURRENT_REQUESTS",
+    );
+
+    return { mode: "DEEPSEEK_FALLBACK", deepseekApiKey, deepseekModel, maxRequestsPerMinute, maxConcurrentRequests };
   }
 
   const openaiApiKey = trimOrEmpty(env.OPENAI_API_KEY);

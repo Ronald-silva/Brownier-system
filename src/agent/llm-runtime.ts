@@ -9,6 +9,8 @@ import { createOpenAiLlmProvider } from "./providers/openai-llm-provider.ts";
 import type { OpenAiResponsesClient } from "./providers/openai-llm-provider.ts";
 import { createNvidiaNemotronLlmProvider } from "./providers/nvidia-nemotron-llm-provider.ts";
 import type { NvidiaCompatibleClient } from "./providers/nvidia-nemotron-llm-provider.ts";
+import { createDeepseekLlmProvider } from "./providers/deepseek-llm-provider.ts";
+import type { DeepseekCompatibleClient } from "./providers/deepseek-llm-provider.ts";
 import { createNvidiaNemotronVerbalizerProvider } from "./providers/nvidia-nemotron-verbalizer-provider.ts";
 import { createLlmInterpreter } from "./llm-interpreter.ts";
 import type { LlmInterpreter } from "./llm-interpreter.types.ts";
@@ -31,10 +33,11 @@ export type LlmRuntime =
 export type ResolveLlmRuntimeInput = {
   env: Record<string, string | undefined>;
   // Só para testes: quando ausente, createOpenAiLlmProvider/
-  // createNvidiaNemotronLlmProvider criam o cliente oficial do SDK (rede
-  // real). Nunca exposto de volta no retorno.
+  // createNvidiaNemotronLlmProvider/createDeepseekLlmProvider criam o
+  // cliente oficial do SDK (rede real). Nunca exposto de volta no retorno.
   openAiClient?: OpenAiResponsesClient;
   nvidiaClient?: NvidiaCompatibleClient;
+  deepseekClient?: DeepseekCompatibleClient;
   // Cliente da chamada de verbalização (NVIDIA #2) — separado do cliente do
   // planejamento (chamada #1) só para permitir testes que precisam
   // distingui-los; em produção normalmente é o mesmo cliente NVIDIA.
@@ -55,6 +58,19 @@ export function resolveLlmRuntime(input: ResolveLlmRuntimeInput): LlmRuntime {
       maxRequestsPerMinute: config.maxRequestsPerMinute,
       maxConcurrentRequests: config.maxConcurrentRequests,
       client: input.openAiClient,
+    });
+    const llmInterpreter = createLlmInterpreter({ provider });
+
+    return { llmMode: "FALLBACK", llmInterpreter };
+  }
+
+  if (config.mode === "DEEPSEEK_FALLBACK") {
+    const provider = createDeepseekLlmProvider({
+      apiKey: config.deepseekApiKey,
+      model: config.deepseekModel,
+      maxRequestsPerMinute: config.maxRequestsPerMinute,
+      maxConcurrentRequests: config.maxConcurrentRequests,
+      client: input.deepseekClient,
     });
     const llmInterpreter = createLlmInterpreter({ provider });
 

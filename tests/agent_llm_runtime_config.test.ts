@@ -13,6 +13,14 @@ function validFallbackEnv(overrides: Env = {}): Env {
   };
 }
 
+function validDeepseekEnv(overrides: Env = {}): Env {
+  return {
+    BF_LLM_MODE: "DEEPSEEK_FALLBACK",
+    DEEPSEEK_API_KEY: "sk-deepseek-abc123",
+    ...overrides,
+  };
+}
+
 function validNvidiaEnv(overrides: Env = {}): Env {
   return {
     BF_LLM_MODE: "NVIDIA_NEMOTRON",
@@ -612,4 +620,94 @@ test("88. chamadas diferentes de NVIDIA_NEMOTRON retornam objetos independentes"
   const result2 = readLlmRuntimeConfig(env);
   assert.notEqual(result1, result2);
   assert.deepEqual(result1, result2);
+});
+
+// --- DEEPSEEK_FALLBACK -------------------------------------------------
+
+test("89. DEEPSEEK_FALLBACK válido retorna chave e modelo padrão", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv());
+  assert.deepEqual(result, {
+    mode: "DEEPSEEK_FALLBACK",
+    deepseekApiKey: "sk-deepseek-abc123",
+    deepseekModel: "deepseek-chat",
+    maxRequestsPerMinute: 30,
+    maxConcurrentRequests: 2,
+  });
+});
+
+test("90. DEEPSEEK_FALLBACK aplica trim ao modo e à chave", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv({ BF_LLM_MODE: "  DEEPSEEK_FALLBACK  ", DEEPSEEK_API_KEY: "  sk-deepseek-abc123  " }));
+  assert.equal(result.mode, "DEEPSEEK_FALLBACK");
+  assert.equal((result as { deepseekApiKey: string }).deepseekApiKey, "sk-deepseek-abc123");
+});
+
+test("91. DEEPSEEK_FALLBACK aceita model customizado com trim", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv({ DEEPSEEK_MODEL: "  deepseek-reasoner  " }));
+  assert.equal((result as { deepseekModel: string }).deepseekModel, "deepseek-reasoner");
+});
+
+test("92. DEEPSEEK_FALLBACK sem chave é rejeitado", () => {
+  assertThrowsWithCode(validDeepseekEnv({ DEEPSEEK_API_KEY: undefined }), "MISSING_DEEPSEEK_API_KEY");
+});
+
+test("93. DEEPSEEK_FALLBACK com chave vazia é rejeitado", () => {
+  assertThrowsWithCode(validDeepseekEnv({ DEEPSEEK_API_KEY: "" }), "MISSING_DEEPSEEK_API_KEY");
+});
+
+test("94. DEEPSEEK_FALLBACK com chave apenas em espaços é rejeitado", () => {
+  assertThrowsWithCode(validDeepseekEnv({ DEEPSEEK_API_KEY: "   " }), "MISSING_DEEPSEEK_API_KEY");
+});
+
+test("95. DEEPSEEK_FALLBACK sem model usa o padrão deepseek-chat, não exige a variável", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv({ DEEPSEEK_MODEL: undefined }));
+  assert.equal((result as { deepseekModel: string }).deepseekModel, "deepseek-chat");
+});
+
+test("96. DEEPSEEK_FALLBACK com model acima do limite é rejeitado", () => {
+  assertThrowsWithCode(validDeepseekEnv({ DEEPSEEK_MODEL: "x".repeat(201) }), "INVALID_DEEPSEEK_MODEL");
+});
+
+test("97. DEEPSEEK_FALLBACK usa padrão 30 para requests/minuto e 2 para concorrência quando ausentes", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv());
+  assert.equal((result as { maxRequestsPerMinute: number }).maxRequestsPerMinute, 30);
+  assert.equal((result as { maxConcurrentRequests: number }).maxConcurrentRequests, 2);
+});
+
+test("98. DEEPSEEK_FALLBACK repassa BF_LLM_MAX_REQUESTS_PER_MINUTE e BF_LLM_MAX_CONCURRENT_REQUESTS intactos", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv({ BF_LLM_MAX_REQUESTS_PER_MINUTE: "5", BF_LLM_MAX_CONCURRENT_REQUESTS: "1" }));
+  assert.equal((result as { maxRequestsPerMinute: number }).maxRequestsPerMinute, 5);
+  assert.equal((result as { maxConcurrentRequests: number }).maxConcurrentRequests, 1);
+});
+
+test("99. DEEPSEEK_FALLBACK com limite inválido lança LlmRuntimeConfigError", () => {
+  assertThrowsWithCode(validDeepseekEnv({ BF_LLM_MAX_REQUESTS_PER_MINUTE: "0" }), "INVALID_LLM_MAX_REQUESTS_PER_MINUTE");
+});
+
+test("100. DEEPSEEK_FALLBACK ignora variáveis NVIDIA e OPENAI inválidas", () => {
+  const result = readLlmRuntimeConfig(validDeepseekEnv({
+    NVIDIA_MODEL: 123 as unknown as string,
+    NVIDIA_BASE_URL: "not-a-url",
+    OPENAI_MODEL: "",
+  }));
+  assert.equal(result.mode, "DEEPSEEK_FALLBACK");
+});
+
+test("101. DISABLED ignora variáveis DEEPSEEK inválidas", () => {
+  const result = readLlmRuntimeConfig({ BF_LLM_MODE: "DISABLED", DEEPSEEK_API_KEY: "" });
+  assert.deepEqual(result, { mode: "DISABLED" });
+});
+
+test("102. duas chamadas de DEEPSEEK_FALLBACK retornam objetos independentes", () => {
+  const env = validDeepseekEnv();
+  const result1 = readLlmRuntimeConfig(env);
+  const result2 = readLlmRuntimeConfig(env);
+  assert.notEqual(result1, result2);
+  assert.deepEqual(result1, result2);
+});
+
+test("103. env não é mutado para DEEPSEEK_FALLBACK", () => {
+  const env = validDeepseekEnv({ DEEPSEEK_MODEL: "deepseek-reasoner" });
+  const snapshot = JSON.stringify(env);
+  readLlmRuntimeConfig(env);
+  assert.equal(JSON.stringify(env), snapshot);
 });
