@@ -104,6 +104,7 @@ export type AgentTools = {
   // não ser enviada ao LLM por padrão.
   getBusinessAddress?(): string;
   getBusinessResponsible?(): string;
+  getBusinessPixKey?(): string;
   getBusinessHours?(): string;
   // Fato determinístico de "está aberto agora" — calculado no servidor a
   // partir do relógio real, nunca pelo modelo. Ver operating-status.ts.
@@ -175,6 +176,10 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
 
     getBusinessResponsible() {
       return typeof store.business.responsibleName === "string" ? store.business.responsibleName.trim() : "";
+    },
+
+    getBusinessPixKey() {
+      return typeof store.business.pixKey === "string" ? store.business.pixKey.trim() : "";
     },
 
     getBusinessHours() {

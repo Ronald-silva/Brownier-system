@@ -701,7 +701,7 @@ export function createTextConversationService(
           policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
-      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE") {
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE" || factualIntent?.kind === "PAYMENT_OPTIONS" || factualIntent?.kind === "PIX_KEY") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
@@ -714,6 +714,12 @@ export function createTextConversationService(
               ? { event: "OUT_OF_SCOPE_PRODUCT", messageKey: "OUT_OF_SCOPE_PRODUCT" }
             : factualIntent.kind === "RESPONSIBLE"
               ? { event: "BUSINESS_RESPONSIBLE", messageKey: "BUSINESS_RESPONSIBLE", data: { name: tools.getBusinessResponsible?.() || "Mateus" } }
+            : factualIntent.kind === "PAYMENT_OPTIONS"
+              ? { event: "BUSINESS_PAYMENT_OPTIONS", messageKey: "BUSINESS_PAYMENT_OPTIONS", data: { options: tools.getBusiness().paymentMethods } }
+            : factualIntent.kind === "PIX_KEY"
+              ? tools.getBusinessPixKey?.()
+                ? { event: "BUSINESS_PIX_KEY", messageKey: "BUSINESS_PIX_KEY", data: { pixKey: tools.getBusinessPixKey() } }
+                : { event: "BUSINESS_PIX_KEY_UNAVAILABLE", messageKey: "BUSINESS_PIX_KEY_UNAVAILABLE" }
             : (() => {
                 const quote = tools.quoteCart?.(sessionBefore.items);
                 return quote

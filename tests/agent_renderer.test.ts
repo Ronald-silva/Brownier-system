@@ -356,6 +356,17 @@ test("renderTextConversationPolicyMessage informa o total sem depender do LLM", 
   assert.match(messages[0].text, /R\$ 24,00/);
 });
 
+test("renderTextConversationPolicyMessage informa as formas de pagamento cadastradas", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "BUSINESS_PAYMENT_OPTIONS", data: { options: ["PIX", "DINHEIRO"] } });
+  assert.match(messages[0].text, /PIX/);
+  assert.match(messages[0].text, /DINHEIRO/);
+});
+
+test("renderTextConversationPolicyMessage não inventa chave PIX ausente", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "BUSINESS_PIX_KEY_UNAVAILABLE" });
+  assert.match(messages[0].text, /ainda não está cadastrada/i);
+});
+
 test("renderTextConversationPolicyMessage redireciona produto fora do cardápio sem handoff", () => {
   const messages = renderTextConversationPolicyMessage({ messageKey: "OUT_OF_SCOPE_PRODUCT" });
   assert.match(messages[0].text, /brownies/i);

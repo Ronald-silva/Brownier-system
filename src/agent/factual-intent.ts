@@ -6,6 +6,8 @@ export type FactualIntent =
   | { kind: "PICKUP_AVAILABILITY"; status: OperatingStatus }
   | { kind: "CART_TOTAL" }
   | { kind: "RESPONSIBLE"; name?: string }
+  | { kind: "PAYMENT_OPTIONS" }
+  | { kind: "PIX_KEY" }
   | { kind: "OUT_OF_SCOPE_PRODUCT" }
   | { kind: "MENU" };
 
@@ -71,6 +73,14 @@ export function resolveFactualIntent(input: {
 
   if (words.has("responsavel") || (words.has("quem") && (words.has("fala") || words.has("falo")))) {
     return { kind: "RESPONSIBLE" };
+  }
+
+  if (words.has("pix") && (words.has("chave") || words.has("qual") || words.has("codigo"))) {
+    return { kind: "PIX_KEY" };
+  }
+
+  if (words.has("cartao") || words.has("cartoes") || words.has("pagamento") || words.has("pagar") || words.has("aceita")) {
+    return { kind: "PAYMENT_OPTIONS" };
   }
 
   // Perguntas gerais sobre preço levam ao cardápio real. Perguntas por um

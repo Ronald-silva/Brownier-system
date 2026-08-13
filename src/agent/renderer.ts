@@ -276,6 +276,15 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_RESPONSIBLE":
       text = interpolate(MESSAGE_CATALOG.BUSINESS_RESPONSIBLE, { name: data?.name });
       break;
+    case "BUSINESS_PAYMENT_OPTIONS":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_PAYMENT_OPTIONS, { options: formatOptions(data?.options) });
+      break;
+    case "BUSINESS_PIX_KEY":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_PIX_KEY, { pixKey: data?.pixKey });
+      break;
+    case "BUSINESS_PIX_KEY_UNAVAILABLE":
+      text = MESSAGE_CATALOG.BUSINESS_PIX_KEY_UNAVAILABLE;
+      break;
     case "HUMAN_HANDOFF_CONFIRMATION_REQUIRED":
       text = MESSAGE_CATALOG.HUMAN_HANDOFF_CONFIRMATION_REQUIRED;
       break;

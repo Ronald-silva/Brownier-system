@@ -168,6 +168,9 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   CART_TOTAL: "O total atual do seu pedido é {total}.",
   CART_TOTAL_EMPTY: "Seu carrinho ainda está vazio. Posso mostrar o cardápio para você escolher seus brownies.",
   BUSINESS_RESPONSIBLE: "O responsável pela Brownieria é {name}. Posso ajudar você com o cardápio, valores ou pedido por aqui.",
+  BUSINESS_PAYMENT_OPTIONS: "No momento, as formas de pagamento disponíveis são:\n\n{options}",
+  BUSINESS_PIX_KEY: "A chave PIX da loja é:\n\n{pixKey}",
+  BUSINESS_PIX_KEY_UNAVAILABLE: "A chave PIX ainda não está cadastrada aqui. Posso seguir com seu pedido e o Mateus confirma o pagamento com você.",
   HUMAN_HANDOFF_CONFIRMATION_REQUIRED: "Posso ajudar você por aqui com cardápio, valores, pedido, horário e endereço. Se quiser mesmo falar com alguém, escreva “atendente”.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",
 
