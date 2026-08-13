@@ -9,7 +9,7 @@ import { createOpenAiLlmProvider } from "./providers/openai-llm-provider.ts";
 import type { OpenAiResponsesClient } from "./providers/openai-llm-provider.ts";
 import { createNvidiaNemotronLlmProvider } from "./providers/nvidia-nemotron-llm-provider.ts";
 import type { NvidiaCompatibleClient } from "./providers/nvidia-nemotron-llm-provider.ts";
-import { createDeepseekLlmProvider } from "./providers/deepseek-llm-provider.ts";
+import { createDeepseekLlmProvider, createDeepseekVerbalizerProvider } from "./providers/deepseek-llm-provider.ts";
 import type { DeepseekCompatibleClient } from "./providers/deepseek-llm-provider.ts";
 import { createNvidiaNemotronVerbalizerProvider } from "./providers/nvidia-nemotron-verbalizer-provider.ts";
 import { createLlmInterpreter } from "./llm-interpreter.ts";
@@ -19,7 +19,7 @@ import type { LlmVerbalizer } from "./llm-verbalizer.ts";
 
 export type LlmRuntime =
   | { llmMode: "DISABLED" }
-  | { llmMode: "FALLBACK"; llmInterpreter: LlmInterpreter }
+  | { llmMode: "FALLBACK"; llmInterpreter: LlmInterpreter; verbalizationMode: "DISABLED" | "ENABLED"; llmVerbalizer?: LlmVerbalizer }
   | {
       llmMode: "NVIDIA_NEMOTRON";
       llmInterpreter: LlmInterpreter;
@@ -61,7 +61,7 @@ export function resolveLlmRuntime(input: ResolveLlmRuntimeInput): LlmRuntime {
     });
     const llmInterpreter = createLlmInterpreter({ provider });
 
-    return { llmMode: "FALLBACK", llmInterpreter };
+    return { llmMode: "FALLBACK", llmInterpreter, verbalizationMode: "DISABLED" };
   }
 
   if (config.mode === "DEEPSEEK_FALLBACK") {
@@ -74,7 +74,14 @@ export function resolveLlmRuntime(input: ResolveLlmRuntimeInput): LlmRuntime {
     });
     const llmInterpreter = createLlmInterpreter({ provider });
 
-    return { llmMode: "FALLBACK", llmInterpreter };
+    const verbalizerProvider = createDeepseekVerbalizerProvider({
+      apiKey: config.deepseekApiKey,
+      model: config.deepseekModel,
+      maxRequestsPerMinute: config.maxRequestsPerMinute,
+      maxConcurrentRequests: config.maxConcurrentRequests,
+      client: input.deepseekClient,
+    });
+    return { llmMode: "FALLBACK", llmInterpreter, verbalizationMode: "ENABLED", llmVerbalizer: createLlmVerbalizer({ provider: verbalizerProvider }) };
   }
 
   if (config.mode === "NVIDIA_NEMOTRON") {

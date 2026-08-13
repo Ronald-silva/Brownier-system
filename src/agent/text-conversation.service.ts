@@ -254,10 +254,12 @@ function publicSuggestions(suggestions: string[] | undefined): string[] {
 }
 
 function explicitlyRequestsHuman(text: string): boolean {
-  return new Set([
+  const normalized = normalizeInterpreterText(text);
+  if (new Set([
     "atendente", "atendimento humano", "falar com atendente",
     "falar com uma pessoa", "humano", "suporte",
-  ]).has(normalizeInterpreterText(text));
+  ]).has(normalized)) return true;
+  return /^(?:quero|gostaria|preciso|posso|pode).*(?:falar|conversar).*(?:pessoa|alguem|atendente|humano)/.test(normalized);
 }
 
 // O LLM Interpreter e o Output Validator carregam campos nunca pensados para

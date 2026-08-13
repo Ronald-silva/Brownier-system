@@ -39,8 +39,8 @@ export function createWhatsappConversationRuntime(input: {
   });
   const llmMode = llmRuntime.llmMode === "DISABLED" ? "DISABLED" : "FALLBACK";
   const llmInterpreter = llmRuntime.llmMode === "DISABLED" ? undefined : llmRuntime.llmInterpreter;
-  const verbalizationMode = llmRuntime.llmMode === "NVIDIA_NEMOTRON" ? llmRuntime.verbalizationMode : "DISABLED";
-  const llmVerbalizer = llmRuntime.llmMode === "NVIDIA_NEMOTRON" ? llmRuntime.llmVerbalizer : undefined;
+  const verbalizationMode = llmRuntime.llmMode === "DISABLED" ? "DISABLED" : llmRuntime.verbalizationMode;
+  const llmVerbalizer = llmRuntime.llmMode === "DISABLED" ? undefined : llmRuntime.llmVerbalizer;
   const sessionLocks = new Map<string, Promise<unknown>>();
 
   function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {

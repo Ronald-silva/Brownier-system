@@ -24,7 +24,9 @@ import OpenAI, {
   RateLimitError,
 } from "openai";
 import type { LlmInterpreterProvider, LlmProviderRequest } from "../llm-interpreter.types.ts";
+import type { LlmVerbalizerProvider, LlmVerbalizerProviderRequest } from "../llm-verbalizer.ts";
 import { OPENAI_LLM_RESPONSE_SCHEMA } from "./openai-response-schema.ts";
+import { VERBALIZER_RESPONSE_SCHEMA } from "./verbalizer-response-schema.ts";
 
 // --- erro local ---------------------------------------------------------
 // Apenas code + retryable: nunca prompt, chave ou resposta bruta do provider.
@@ -148,8 +150,8 @@ function normalizeBaseURL(baseURL: unknown): string {
 // formato esperado — daí o texto explícito abaixo, em vez de só citar o
 // nome do schema como o provider NVIDIA faz.
 
-function buildSystemPrompt(systemPrompt: string, schemaName: string): string {
-  const serializedSchema = JSON.stringify(OPENAI_LLM_RESPONSE_SCHEMA);
+function buildSystemPrompt(systemPrompt: string, schemaName: string, schema: unknown): string {
+  const serializedSchema = JSON.stringify(schema);
   return (
     `${systemPrompt}\n\n` +
     `Responda somente em json válido, sem texto adicional, sem markdown e sem comentários. ` +
@@ -157,9 +159,7 @@ function buildSystemPrompt(systemPrompt: string, schemaName: string): string {
   );
 }
 
-export function createDeepseekLlmProvider(
-  input: CreateDeepseekLlmProviderInput,
-): LlmInterpreterProvider {
+function createDeepseekStructuredProvider(input: CreateDeepseekLlmProviderInput, schema: unknown): { generateStructuredOutput(request: LlmProviderRequest | LlmVerbalizerProviderRequest): Promise<unknown> } {
   const apiKey = normalizeApiKey(input.apiKey);
   const model = normalizeModel(input.model);
   const baseURL = normalizeBaseURL(input.baseURL);
@@ -170,7 +170,7 @@ export function createDeepseekLlmProvider(
   let activeRequestCount = 0;
 
   return {
-    async generateStructuredOutput(request: LlmProviderRequest): Promise<unknown> {
+    async generateStructuredOutput(request: LlmProviderRequest | LlmVerbalizerProviderRequest): Promise<unknown> {
       const { systemPrompt, userPrompt, schemaName } = request;
       const startedAt = Date.now();
       requestTimestamps = requestTimestamps.filter(timestamp => startedAt - timestamp < RATE_LIMIT_WINDOW_MS);
@@ -189,7 +189,7 @@ export function createDeepseekLlmProvider(
           const requestBody: DeepseekChatCompletionRequest = {
             model,
             messages: [
-              { role: "system", content: buildSystemPrompt(systemPrompt, schemaName) },
+              { role: "system", content: buildSystemPrompt(systemPrompt, schemaName, schema) },
               { role: "user", content: userPrompt },
             ],
             temperature: 0,
@@ -211,4 +211,12 @@ export function createDeepseekLlmProvider(
       }
     },
   };
+}
+
+export function createDeepseekLlmProvider(input: CreateDeepseekLlmProviderInput): LlmInterpreterProvider {
+  return createDeepseekStructuredProvider(input, OPENAI_LLM_RESPONSE_SCHEMA);
+}
+
+export function createDeepseekVerbalizerProvider(input: CreateDeepseekLlmProviderInput): LlmVerbalizerProvider {
+  return createDeepseekStructuredProvider(input, VERBALIZER_RESPONSE_SCHEMA);
 }
