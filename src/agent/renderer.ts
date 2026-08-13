@@ -285,6 +285,12 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_PAYMENT_PROOF":
       text = MESSAGE_CATALOG.BUSINESS_PAYMENT_PROOF;
       break;
+    case "BUSINESS_WHATSAPP_LINK":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_WHATSAPP_LINK, { whatsappLink: data?.whatsappLink });
+      break;
+    case "BUSINESS_WHATSAPP_UNAVAILABLE":
+      text = MESSAGE_CATALOG.BUSINESS_WHATSAPP_UNAVAILABLE;
+      break;
     case "BUSINESS_OPERATING_HOURS":
       text = interpolate(MESSAGE_CATALOG.BUSINESS_OPERATING_HOURS, { hours: data?.hours });
       break;

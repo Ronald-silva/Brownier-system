@@ -9,6 +9,7 @@ export type FactualIntent =
   | { kind: "PAYMENT_OPTIONS" }
   | { kind: "PIX_KEY" }
   | { kind: "PAYMENT_PROOF" }
+  | { kind: "WHATSAPP_CONTACT" }
   | { kind: "OPERATING_HOURS" }
   | { kind: "DELIVERY" }
   | { kind: "OUT_OF_SCOPE_PRODUCT" }
@@ -66,6 +67,7 @@ export function resolveFactualIntent(input: {
   const asksSchedule = (words.has("horario") && (words.has("funcionamento") || words.has("funciona"))) || asksWeekend;
   if (asksSchedule) return { kind: "OPERATING_HOURS" };
   if (words.has("comprovante")) return { kind: "PAYMENT_PROOF" };
+  if (words.has("whatsapp") || words.has("zap")) return { kind: "WHATSAPP_CONTACT" };
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };

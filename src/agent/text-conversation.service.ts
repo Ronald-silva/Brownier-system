@@ -46,6 +46,7 @@ import type {
 } from "./llm-interpreter.types.ts";
 import { executeConversationActionBatch, isFailureResult } from "./conversation-action-batch.ts";
 import { resolveFactualIntent } from "./factual-intent.ts";
+import { buildWhatsappLink } from "../lib/whatsapp.ts";
 import type { OperatingStatus } from "./operating-status.ts";
 import { WEEKDAY_LABELS_PT_BR, formatTimeBR } from "../lib/business-hours.ts";
 import { buildAllowedFacts } from "./allowed-facts.ts";
@@ -703,7 +704,7 @@ export function createTextConversationService(
           policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
-      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE" || factualIntent?.kind === "PAYMENT_OPTIONS" || factualIntent?.kind === "PIX_KEY" || factualIntent?.kind === "PAYMENT_PROOF" || factualIntent?.kind === "OPERATING_HOURS" || factualIntent?.kind === "DELIVERY") {
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE" || factualIntent?.kind === "PAYMENT_OPTIONS" || factualIntent?.kind === "PIX_KEY" || factualIntent?.kind === "PAYMENT_PROOF" || factualIntent?.kind === "WHATSAPP_CONTACT" || factualIntent?.kind === "OPERATING_HOURS" || factualIntent?.kind === "DELIVERY") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
@@ -724,6 +725,10 @@ export function createTextConversationService(
                 : { event: "BUSINESS_PIX_KEY_UNAVAILABLE", messageKey: "BUSINESS_PIX_KEY_UNAVAILABLE" }
             : factualIntent.kind === "PAYMENT_PROOF"
               ? { event: "BUSINESS_PAYMENT_PROOF", messageKey: "BUSINESS_PAYMENT_PROOF" }
+            : factualIntent.kind === "WHATSAPP_CONTACT"
+              ? buildWhatsappLink(tools.getBusiness().whatsapp)
+                ? { event: "BUSINESS_WHATSAPP_LINK", messageKey: "BUSINESS_WHATSAPP_LINK", data: { whatsappLink: buildWhatsappLink(tools.getBusiness().whatsapp) } }
+                : { event: "BUSINESS_WHATSAPP_UNAVAILABLE", messageKey: "BUSINESS_WHATSAPP_UNAVAILABLE" }
             : factualIntent.kind === "OPERATING_HOURS"
               ? { event: "BUSINESS_OPERATING_HOURS", messageKey: "BUSINESS_OPERATING_HOURS", data: { hours: tools.getBusinessHours?.() || "Horários não cadastrados." } }
             : factualIntent.kind === "DELIVERY"

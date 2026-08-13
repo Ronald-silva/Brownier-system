@@ -86,6 +86,12 @@ test("pergunta sobre comprovante de PIX não depende do modelo", () => {
   assert.equal(resolveFactualIntent({ text: "onde mando o comprovante?" })?.kind, "PAYMENT_PROOF");
 });
 
+for (const text of ["qual o WhatsApp?", "me manda o link do zap"]) {
+  test(`pedido de contato do WhatsApp é factual: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "WHATSAPP_CONTACT");
+  });
+}
+
 for (const text of ["faz entregas?", "tem delivery?"]) {
   test(`pergunta de entrega é factual: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text })?.kind, "DELIVERY");
