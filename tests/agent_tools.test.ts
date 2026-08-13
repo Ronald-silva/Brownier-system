@@ -260,6 +260,12 @@ test("getOperatingStatus delega para operating-status.ts usando o relógio injet
   if (status.known) { assert.equal(status.isOpenNow, true); assert.equal(status.currentClose, "18:00"); }
 });
 
+test("getTomorrowPickupSchedule retorna o horário real do próximo dia no fuso da loja", () => {
+  const store = makeStore({ business: { ...makeStore().business, operatingHours: INITIAL_OPERATING_HOURS } });
+  const tools = createAgentTools({ store, now: () => new Date("2026-08-03T10:00:00-03:00") }); // segunda; amanhã é terça
+  assert.deepEqual(tools.getTomorrowPickupSchedule!(), { weekday: "terça-feira", hours: "8h às 18h", open: true });
+});
+
 test("getOperatingStatus nunca lança quando operatingHours está ausente ou malformado — vira known:false", () => {
   const missing = createAgentTools({ store: makeStore() });
   assert.deepEqual(missing.getOperatingStatus!(), { known: false });

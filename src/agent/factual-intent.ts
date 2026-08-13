@@ -11,6 +11,7 @@ export type FactualIntent =
   | { kind: "PAYMENT_PROOF" }
   | { kind: "WHATSAPP_CONTACT" }
   | { kind: "OPERATING_HOURS" }
+  | { kind: "PICKUP_TOMORROW" }
   | { kind: "DELIVERY" }
   | { kind: "OUT_OF_SCOPE_PRODUCT" }
   | { kind: "MENU" };
@@ -83,7 +84,7 @@ export function resolveFactualIntent(input: {
   // "amanhã dá certo?" é uma pergunta de horário/disponibilidade, mesmo
   // sem repetir a palavra retirada. A agenda completa é preferível a uma
   // resposta vaga ou a uma previsão inventada pelo modelo.
-  if (words.has("amanha")) return { kind: "OPERATING_HOURS" };
+  if (words.has("amanha")) return { kind: "PICKUP_TOMORROW" };
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };

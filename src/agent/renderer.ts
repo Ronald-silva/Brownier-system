@@ -294,6 +294,12 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_OPERATING_HOURS":
       text = interpolate(MESSAGE_CATALOG.BUSINESS_OPERATING_HOURS, { hours: data?.hours });
       break;
+    case "BUSINESS_TOMORROW_OPEN":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_TOMORROW_OPEN, { weekday: data?.weekday, hours: data?.hours });
+      break;
+    case "BUSINESS_TOMORROW_CLOSED":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_TOMORROW_CLOSED, { weekday: data?.weekday });
+      break;
     case "BUSINESS_PIX_KEY_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_PIX_KEY_UNAVAILABLE;
       break;

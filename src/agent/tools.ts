@@ -13,7 +13,7 @@ import {
   type BusinessForOrderCreation,
   type StoreLike,
 } from "../lib/orders.ts";
-import { formatWeeklyHoursBR, isStructuredWeeklyHours } from "../lib/business-hours.ts";
+import { formatTimeBR, formatWeeklyHoursBR, isStructuredWeeklyHours, WEEKDAY_LABELS_PT_BR } from "../lib/business-hours.ts";
 import { calculateLinePrice } from "../lib/pricing.ts";
 import { getOperatingStatus, type OperatingStatus } from "./operating-status.ts";
 
@@ -84,6 +84,8 @@ export type AgentCartQuote = {
   total: number;
 };
 
+export type AgentTomorrowPickupSchedule = { weekday: string; hours: string; open: boolean };
+
 export type AgentToolsDependencies = {
   store: AgentDomainStore;
   now?: () => Date;
@@ -109,6 +111,7 @@ export type AgentTools = {
   // Fato determinístico de "está aberto agora" — calculado no servidor a
   // partir do relógio real, nunca pelo modelo. Ver operating-status.ts.
   getOperatingStatus?(): OperatingStatus;
+  getTomorrowPickupSchedule?(): AgentTomorrowPickupSchedule | null;
   quoteCart?(items: Array<{ productId: string; quantity: number }>): AgentCartQuote | null;
   getPickupSlots(): string[];
   validatePickupTime(time: string): boolean;
@@ -191,6 +194,20 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
     getOperatingStatus() {
       const structured = store.business.operatingHours;
       return getOperatingStatus({ now: now(), hours: isStructuredWeeklyHours(structured) ? structured : undefined });
+    },
+
+    getTomorrowPickupSchedule() {
+      const structured = store.business.operatingHours;
+      if (!isStructuredWeeklyHours(structured)) return null;
+      const tomorrow = new Date(now().getTime() + 24 * 60 * 60 * 1000);
+      const status = getOperatingStatus({ now: tomorrow, hours: structured });
+      if (!status.known) return null;
+      const ranges = structured[status.weekday];
+      return {
+        weekday: WEEKDAY_LABELS_PT_BR[status.weekday],
+        hours: ranges.map(range => `${formatTimeBR(range.open)} às ${formatTimeBR(range.close)}`).join(" e "),
+        open: ranges.length > 0,
+      };
     },
 
     quoteCart(items) {
