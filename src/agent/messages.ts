@@ -160,6 +160,8 @@ export const MESSAGE_CATALOG: Record<string, string> = {
     "No momento estamos fechados e não encontrei o próximo horário de abertura. Posso chamar um atendente para confirmar.",
   BUSINESS_PICKUP_HOURS_UNAVAILABLE:
     "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar.",
+  OUT_OF_SCOPE_PRODUCT:
+    "Aqui na Brownieria trabalhamos com brownies, não com produtos por quilo 😊 Posso mostrar os sabores e valores disponíveis hoje.",
   CART_TOTAL: "O total atual do seu pedido é {total}.",
   CART_TOTAL_EMPTY: "Seu carrinho ainda está vazio. Posso mostrar o cardápio para você escolher seus brownies.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",

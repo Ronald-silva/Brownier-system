@@ -5,6 +5,7 @@ export type FactualIntent =
   | { kind: "ADDRESS"; address?: string }
   | { kind: "PICKUP_AVAILABILITY"; status: OperatingStatus }
   | { kind: "CART_TOTAL" }
+  | { kind: "OUT_OF_SCOPE_PRODUCT" }
   | { kind: "MENU" };
 
 function tokens(text: string): Set<string> {
@@ -20,6 +21,15 @@ const OPEN_STATE_WORDS = new Set([
   "aberto", "aberta", "abertos", "abertas", "abre", "abrem", "abriu",
   "funciona", "funcionam", "funcionando",
   "fechado", "fechada", "fechados", "fechadas",
+]);
+
+// A demo não deve consumir as tentativas do cliente quando ele pergunta por
+// itens claramente fora de uma brownieria. Esta lista deliberadamente cobre
+// produtos de feira comuns, não nomes de brownies; a resposta não afirma
+// disponibilidade de nada, apenas redireciona ao cardápio real.
+const OUT_OF_SCOPE_PRODUCE_WORDS = new Set([
+  "manga", "uva", "pera", "morango", "banana", "maca", "laranja", "abacaxi",
+  "melancia", "mamao", "limao", "goiaba", "acai", "tomate", "batata",
 ]);
 
 // Intenções factuais são conceitos do domínio, não uma lista de frases. Elas
@@ -39,6 +49,10 @@ export function resolveFactualIntent(input: {
   if (words.has("endereco") || words.has("localizacao") || (asksLocation && pickupContext)) {
     const address = input.address?.trim();
     return address ? { kind: "ADDRESS", address } : { kind: "ADDRESS" };
+  }
+
+  if (words.has("kg") || words.has("quilo") || words.has("kilo") || [...OUT_OF_SCOPE_PRODUCE_WORDS].some(word => words.has(word))) {
+    return { kind: "OUT_OF_SCOPE_PRODUCT" };
   }
 
   const asksNow = words.has("agora") || words.has("hoje") || words.has("horario");

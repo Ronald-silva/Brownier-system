@@ -694,7 +694,7 @@ export function createTextConversationService(
           policy: { misunderstandingCountBefore, misunderstandingCountAfter: sessionAfter.misunderstandingCount, handoffTriggered: false, counterReset },
         };
       }
-      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL") {
+      if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
@@ -703,6 +703,8 @@ export function createTextConversationService(
             : { event: "BUSINESS_ADDRESS_UNAVAILABLE", messageKey: "BUSINESS_ADDRESS_UNAVAILABLE" }
           : factualIntent.kind === "PICKUP_AVAILABILITY"
             ? pickupAvailabilityPolicyResult(factualIntent.status)
+            : factualIntent.kind === "OUT_OF_SCOPE_PRODUCT"
+              ? { event: "OUT_OF_SCOPE_PRODUCT", messageKey: "OUT_OF_SCOPE_PRODUCT" }
             : (() => {
                 const quote = tools.quoteCart?.(sessionBefore.items);
                 return quote

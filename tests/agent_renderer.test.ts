@@ -356,6 +356,12 @@ test("renderTextConversationPolicyMessage informa o total sem depender do LLM", 
   assert.match(messages[0].text, /R\$ 24,00/);
 });
 
+test("renderTextConversationPolicyMessage redireciona produto fora do cardápio sem handoff", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "OUT_OF_SCOPE_PRODUCT" });
+  assert.match(messages[0].text, /brownies/i);
+  assert.match(messages[0].text, /não com produtos por quilo/i);
+});
+
 test("Renderer não importa Agent Tools", async () => {
   const source = await fs.readFile(path.resolve(import.meta.dirname, "..", "src", "agent", "renderer.ts"), "utf8");
   assert.doesNotMatch(source, /["']\.\/tools\.ts["']/);

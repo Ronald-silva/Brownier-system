@@ -44,6 +44,12 @@ for (const text of ["quanto é o dindin?", "qual o preço?", "tem bolo?", "tem p
   });
 }
 
+for (const text of ["quanto tá o kg da manga?", "e da uva", "pera", "morango?"]) {
+  test(`produto de feira não cai em incompreensão: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "OUT_OF_SCOPE_PRODUCT");
+  });
+}
+
 test("pergunta pelo valor total é factual e não depende do provider", () => {
   assert.equal(resolveFactualIntent({ text: "qual o valor total do meu pedido?" })?.kind, "CART_TOTAL");
 });

@@ -261,6 +261,9 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_PICKUP_HOURS_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_PICKUP_HOURS_UNAVAILABLE;
       break;
+    case "OUT_OF_SCOPE_PRODUCT":
+      text = MESSAGE_CATALOG.OUT_OF_SCOPE_PRODUCT;
+      break;
     case "CART_TOTAL":
       text = interpolate(MESSAGE_CATALOG.CART_TOTAL, { total: data?.total });
       break;
