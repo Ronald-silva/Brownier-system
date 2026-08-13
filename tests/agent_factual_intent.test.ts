@@ -38,6 +38,12 @@ test("pergunta de cardápio continua funcionando sem relação com horário", ()
   assert.equal(intent?.kind, "MENU");
 });
 
+for (const text of ["quanto é o dindin?", "qual o preço?", "tem bolo?", "tem paçoca?"]) {
+  test(`pergunta coloquial de preço ou disponibilidade mostra o cardápio real: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "MENU");
+  });
+}
+
 test("pergunta pelo valor total é factual e não depende do provider", () => {
   assert.equal(resolveFactualIntent({ text: "qual o valor total do meu pedido?" })?.kind, "CART_TOTAL");
 });
