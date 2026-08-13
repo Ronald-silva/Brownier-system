@@ -39,6 +39,10 @@ const OUT_OF_SCOPE_PRODUCE_WORDS = new Set([
   "melancia", "mamao", "limao", "goiaba", "acai", "tomate", "batata",
 ]);
 
+const OUT_OF_SCOPE_DRINK_WORDS = new Set([
+  "agua", "refrigerante", "refri", "suco", "cafe", "cerveja",
+]);
+
 // Intenções factuais são conceitos do domínio, não uma lista de frases. Elas
 // têm prioridade porque a resposta vem do Store e não exige inferência nem
 // pode ser inventada pelo provider — inclui o cálculo determinístico de
@@ -58,7 +62,15 @@ export function resolveFactualIntent(input: {
     return address ? { kind: "ADDRESS", address } : { kind: "ADDRESS" };
   }
 
-  if (words.has("kg") || words.has("quilo") || words.has("kilo") || [...OUT_OF_SCOPE_PRODUCE_WORDS].some(word => words.has(word))) {
+  // Perguntas de entrega têm prioridade sobre o item mencionado. Assim,
+  // "faz entrega de açaí?" é respondida pela política real de retirada, em
+  // vez de parecer que o agente ignorou a pergunta por causa do produto.
+  const mentionsDeliveryTypo = [...words].some(word => word === "etrea" || word === "etrega" || word === "entrega" || word === "entregas");
+  if (words.has("entrega") || words.has("entregas") || words.has("delivery") || words.has("uber") || words.has("moto") || mentionsDeliveryTypo || (words.has("manda") && words.has("entregar"))) {
+    return { kind: "DELIVERY" };
+  }
+
+  if (words.has("kg") || words.has("quilo") || words.has("kilo") || [...OUT_OF_SCOPE_PRODUCE_WORDS].some(word => words.has(word)) || [...OUT_OF_SCOPE_DRINK_WORDS].some(word => words.has(word))) {
     return { kind: "OUT_OF_SCOPE_PRODUCT" };
   }
 
@@ -68,6 +80,10 @@ export function resolveFactualIntent(input: {
   if (asksSchedule) return { kind: "OPERATING_HOURS" };
   if (words.has("comprovante")) return { kind: "PAYMENT_PROOF" };
   if (words.has("whatsapp") || words.has("zap")) return { kind: "WHATSAPP_CONTACT" };
+  // "amanhã dá certo?" é uma pergunta de horário/disponibilidade, mesmo
+  // sem repetir a palavra retirada. A agenda completa é preferível a uma
+  // resposta vaga ou a uma previsão inventada pelo modelo.
+  if (words.has("amanha")) return { kind: "OPERATING_HOURS" };
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };
@@ -76,7 +92,10 @@ export function resolveFactualIntent(input: {
   // "total" é sempre sobre o pedido em andamento. Tratamos antes do
   // cardápio, pois frases como "qual o valor total?" não devem reabrir o
   // menu nem depender de uma chamada ao modelo.
-  if (words.has("total") || words.has("subtotal")) {
+  // "quanto fica?" sozinho retoma o carrinho já montado; quando a mesma
+  // frase acompanha vários sabores/quantidades, o LLM ainda precisa montar
+  // o pedido antes de calcular (ex.: "5 de cada, quanto fica?").
+  if (words.has("total") || words.has("subtotal") || (words.size <= 3 && words.has("quanto") && words.has("fica"))) {
     return { kind: "CART_TOTAL" };
   }
 
@@ -86,10 +105,6 @@ export function resolveFactualIntent(input: {
 
   if (words.has("pix") && (words.has("chave") || words.has("qual") || words.has("codigo"))) {
     return { kind: "PIX_KEY" };
-  }
-
-  if (words.has("entrega") || words.has("entregas") || words.has("delivery") || (words.has("manda") && words.has("entregar"))) {
-    return { kind: "DELIVERY" };
   }
 
   if (words.has("cartao") || words.has("cartoes") || words.has("pagamento") || words.has("pagar") || words.has("aceita")) {

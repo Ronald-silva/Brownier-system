@@ -44,9 +44,15 @@ for (const text of ["quanto é o dindin?", "qual o preço?"]) {
   });
 }
 
-for (const text of ["tem bolo?", "tem água?", "tem paçoca?"]) {
+for (const text of ["tem bolo?", "tem paçoca?"]) {
   test(`pergunta por produto específico é encaminhada ao catálogo do modelo: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text }), undefined);
+  });
+}
+
+for (const text of ["tem água?", "tem suco?"]) {
+  test(`bebida fora do cardápio recebe resposta comercial segura: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "OUT_OF_SCOPE_PRODUCT");
   });
 }
 
@@ -56,9 +62,11 @@ for (const text of ["quanto tá o kg da manga?", "e da uva", "pera", "morango?"]
   });
 }
 
-test("pergunta pelo valor total é factual e não depende do provider", () => {
-  assert.equal(resolveFactualIntent({ text: "qual o valor total do meu pedido?" })?.kind, "CART_TOTAL");
-});
+for (const text of ["qual o valor total do meu pedido?", "quanto fica?"]) {
+  test(`pergunta de total é factual: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "CART_TOTAL");
+  });
+}
 
 for (const text of ["quem é o responsável?", "com quem eu falo?"]) {
   test(`pergunta pelo responsável é factual: "${text}"`, () => {
@@ -76,7 +84,7 @@ test("pergunta pela chave PIX é factual", () => {
   assert.equal(resolveFactualIntent({ text: "qual é o pix da loja?" })?.kind, "PIX_KEY");
 });
 
-for (const text of ["qual o horário de funcionamento?", "funciona aos finais de semana?"]) {
+for (const text of ["qual o horário de funcionamento?", "funciona aos finais de semana?", "amanhã dá certo?"]) {
   test(`pergunta pelo horário completo é factual: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text })?.kind, "OPERATING_HOURS");
   });
@@ -92,7 +100,7 @@ for (const text of ["qual o WhatsApp?", "me manda o link do zap"]) {
   });
 }
 
-for (const text of ["faz entregas?", "tem delivery?"]) {
+for (const text of ["faz entregas?", "tem delivery?", "pode ir de Uber?", "faz etrea de açaí?"]) {
   test(`pergunta de entrega é factual: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text })?.kind, "DELIVERY");
   });
