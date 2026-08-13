@@ -767,7 +767,7 @@ test("modo textual e modo de ação estruturada convivem na mesma sessão", asyn
   });
 });
 
-// --- Interpretation Policy (misunderstandingCount, handoff automático) -----
+// --- Interpretation Policy (misunderstandingCount, recuperação) -----
 
 type PolicyOutput = {
   interpretation?: { deterministic: { status: string; reason?: string } };
@@ -779,7 +779,7 @@ type PolicyOutput = {
   duplicateMessage: boolean;
 };
 
-test("limite padrão (3) do simulador: três mensagens desconhecidas disparam handoff automático", async () => {
+test("limite padrão (3) do simulador: três mensagens desconhecidas mantêm a conversa aberta", async () => {
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath);
     const contactId = "cliente-handoff-padrao";
@@ -796,23 +796,23 @@ test("limite padrão (3) do simulador: três mensagens desconhecidas disparam ha
     const [third] = await sendTextFlow(sim, contactId, [{ messageId: "hp4", text: "terceira mensagem sem sentido" }]);
     const thirdResult = third as PolicyOutput;
     assert.equal(thirdResult.policy?.misunderstandingCountAfter, 3);
-    assert.equal(thirdResult.policy?.handoffTriggered, true);
-    assert.equal(thirdResult.sessionAfter?.underHumanHandoff, true);
-    assert.equal(thirdResult.sessionAfter?.step, "HUMAN_HANDOFF");
-    assert.match(thirdResult.messages[0]?.text, /encaminhar você para uma pessoa/);
+    assert.equal(thirdResult.policy?.handoffTriggered, false);
+    assert.equal(thirdResult.sessionAfter?.underHumanHandoff, false);
+    assert.notEqual(thirdResult.sessionAfter?.step, "HUMAN_HANDOFF");
+    assert.match(thirdResult.messages[0]?.text, /reformular|cardápio|atendente/i);
     await sim.close();
   });
 });
 
-test("BF_AGENT_MAX_MISUNDERSTANDINGS customizado dispara handoff mais cedo", async () => {
+test("BF_AGENT_MAX_MISUNDERSTANDINGS customizado ajusta a recuperação sem handoff", async () => {
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath, { BF_AGENT_MAX_MISUNDERSTANDINGS: "1" });
     const contactId = "cliente-handoff-custom";
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "hc1", text: "mensagem sem sentido" }]);
     const result = output as PolicyOutput;
     assert.equal(result.policy?.misunderstandingCountAfter, 1);
-    assert.equal(result.policy?.handoffTriggered, true);
-    assert.equal(result.sessionAfter?.underHumanHandoff, true);
+    assert.equal(result.policy?.handoffTriggered, false);
+    assert.equal(result.sessionAfter?.underHumanHandoff, false);
     await sim.close();
   });
 });
@@ -829,7 +829,7 @@ test("BF_AGENT_MAX_MISUNDERSTANDINGS inválido impede a inicialização segura d
   });
 });
 
-test("handoff automático preserva o carrinho e não cria pedido", async () => {
+test("recuperação preserva o carrinho e não cria pedido", async () => {
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath, { BF_AGENT_MAX_MISUNDERSTANDINGS: "2" });
     const contactId = "cliente-handoff-carrinho";
@@ -840,7 +840,7 @@ test("handoff automático preserva o carrinho e não cria pedido", async () => {
     await sendTextFlow(sim, contactId, [{ messageId: "hcart3", text: "mensagem sem sentido" }]);
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "hcart4", text: "outra mensagem sem sentido" }]);
     const result = output as PolicyOutput;
-    assert.equal(result.policy?.handoffTriggered, true);
+    assert.equal(result.policy?.handoffTriggered, false);
     assert.deepEqual(result.sessionAfter?.items, [{ productId: "brownie-brigadeiro", quantity: 1 }]);
 
     const persisted = JSON.parse(await fs.readFile(storePath, "utf8")) as { orders: unknown[] };
@@ -853,13 +853,13 @@ test("mensagem comum durante handoff ativo devolve HUMAN_HANDOFF_ACTIVE sem cham
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath, { BF_AGENT_MAX_MISUNDERSTANDINGS: "1" });
     const contactId = "cliente-handoff-ativo";
-    await sendTextFlow(sim, contactId, [{ messageId: "ha1", text: "mensagem sem sentido" }]);
+    await sendTextFlow(sim, contactId, [{ messageId: "ha1", text: "atendente" }]);
 
     const [output] = await sendTextFlow(sim, contactId, [{ messageId: "ha2", text: "oi de novo" }]);
     const result = output as PolicyOutput;
     assert.equal(result.interpretation?.deterministic.reason, "HUMAN_HANDOFF_ACTIVE");
     assert.equal(result.result, undefined);
-    assert.equal(result.policy?.misunderstandingCountAfter, 1);
+    assert.equal(result.policy?.misunderstandingCountAfter, 0);
     assert.equal(result.policyResult?.messageKey, "HUMAN_HANDOFF_ACTIVE");
     await sim.close();
   });
@@ -869,7 +869,7 @@ test("RESET_CONVERSATION sai do handoff e permite um novo fluxo", async () => {
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath, { BF_AGENT_MAX_MISUNDERSTANDINGS: "1" });
     const contactId = "cliente-handoff-reset";
-    await sendTextFlow(sim, contactId, [{ messageId: "hr1", text: "mensagem sem sentido" }]);
+    await sendTextFlow(sim, contactId, [{ messageId: "hr1", text: "atendente" }]);
 
     const [resetOutput] = await sendTextFlow(sim, contactId, [{ messageId: "hr2", text: "recomeçar" }]);
     const reset = resetOutput as PolicyOutput;
@@ -885,7 +885,7 @@ test("RESET_CONVERSATION sai do handoff e permite um novo fluxo", async () => {
   });
 });
 
-test("mensagem que dispara handoff no limite: replay com o mesmo messageId não gera segundo handoff", async () => {
+test("mensagem que atinge o limite: replay com o mesmo messageId não conta de novo", async () => {
   await withTempStore(async storePath => {
     const sim = startSimulator(storePath, { BF_AGENT_MAX_MISUNDERSTANDINGS: "3" });
     const contactId = "cliente-handoff-duplicado";
@@ -895,7 +895,7 @@ test("mensagem que dispara handoff no limite: replay com o mesmo messageId não 
     ]);
     const [triggerOutput] = await sendTextFlow(sim, contactId, [{ messageId: "hd3", text: "terceira sem sentido" }]);
     const trigger = triggerOutput as PolicyOutput;
-    assert.equal(trigger.policy?.handoffTriggered, true);
+    assert.equal(trigger.policy?.handoffTriggered, false);
     assert.equal(trigger.sessionAfter?.misunderstandingCount, 3);
 
     const [replayOutput] = await sendTextFlow(sim, contactId, [{ messageId: "hd3", text: "terceira sem sentido" }]);
@@ -906,7 +906,7 @@ test("mensagem que dispara handoff no limite: replay com o mesmo messageId não 
     sim.sendLine({ command: "GET_SESSION", channel: "simulator", contactId });
     const session = (await sim.nextOutput()) as { session: { misunderstandingCount: number; underHumanHandoff: boolean } };
     assert.equal(session.session.misunderstandingCount, 3);
-    assert.equal(session.session.underHumanHandoff, true);
+    assert.equal(session.session.underHumanHandoff, false);
 
     const persisted = JSON.parse(await fs.readFile(storePath, "utf8")) as { orders: unknown[] };
     assert.equal(persisted.orders.length, 0);

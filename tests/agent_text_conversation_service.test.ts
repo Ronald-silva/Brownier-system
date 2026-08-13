@@ -168,20 +168,20 @@ const CH = "simulator";
 
 // --- 1-6: configuração de maxMisunderstandings ---
 
-test("limite padrão de não compreensões é 3", async () => {
+test("limite padrão de não compreensões ajusta a ajuda sem transferir automaticamente", async () => {
   const { textService } = makeStack({ interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "cfg-default";
   await textService.processText({ channel: CH, contactId, text: "a" });
   await textService.processText({ channel: CH, contactId, text: "b" });
   const third = await textService.processText({ channel: CH, contactId, text: "c" });
-  assert.equal(third.policy.handoffTriggered, true);
+  assert.equal(third.policy.handoffTriggered, false);
   assert.equal(third.policy.misunderstandingCountAfter, 3);
 });
 
-test("limite customizado funciona", async () => {
+test("limite customizado funciona sem encerrar a conversa", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const result = await textService.processText({ channel: CH, contactId: "cfg-custom", text: "a" });
-  assert.equal(result.policy.handoffTriggered, true);
+  assert.equal(result.policy.handoffTriggered, false);
   assert.equal(result.policy.misunderstandingCountAfter, 1);
 });
 
@@ -502,21 +502,21 @@ test("AMBIGUOUS duplicado não incrementa novamente", async () => {
   assert.equal(replay.policy.misunderstandingCountAfter, 1);
 });
 
-// --- 26-36: handoff automático ---
+// --- 26-36: recuperação sem handoff automático ---
 
-test("limite atingido dispara REQUEST_HUMAN pelo Conversation Service", async () => {
+test("limite atingido mantém a conversa aberta e oferece atendente apenas como opção", async () => {
   const { textService, sessionStore } = makeStack({ maxMisunderstandings: 2, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-basic";
   await textService.processText({ channel: CH, contactId, text: "a" });
   const second = await textService.processText({ channel: CH, contactId, text: "b" });
-  assert.equal(second.policy.handoffTriggered, true);
-  assert.equal(second.sessionAfter.underHumanHandoff, true);
-  assert.equal(second.sessionAfter.step, "HUMAN_HANDOFF");
+  assert.equal(second.policy.handoffTriggered, false);
+  assert.equal(second.sessionAfter.underHumanHandoff, false);
+  assert.notEqual(second.sessionAfter.step, "HUMAN_HANDOFF");
   const sessionKey = buildAgentSessionKey(CH, contactId);
-  assert.equal(sessionStore.get(sessionKey)?.step, "HUMAN_HANDOFF");
+  assert.notEqual(sessionStore.get(sessionKey)?.step, "HUMAN_HANDOFF");
 });
 
-test("handoff automático preserva o carrinho e não cria pedido", async () => {
+test("recuperação preserva o carrinho e não cria pedido", async () => {
   const { sessionStore } = makeStack();
   const contactId = "handoff-preserves-cart";
   const { textService: addToCart } = makeStack({ sessionStore });
@@ -531,12 +531,12 @@ test("handoff automático preserva o carrinho e não cria pedido", async () => {
   await failTwice.processText({ channel: CH, contactId, text: "a" });
   const result = await failTwice.processText({ channel: CH, contactId, text: "b" });
 
-  assert.equal(result.policy.handoffTriggered, true);
+  assert.equal(result.policy.handoffTriggered, false);
   assert.deepEqual(result.sessionAfter.items, [{ productId: "brownie-brigadeiro", quantity: 1 }]);
   assert.equal(result.sessionAfter.createdOrderId, undefined);
 });
 
-test("contador permanece no valor do limite após o handoff automático", async () => {
+test("contador permanece limitado após repetidas falhas", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 2, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-count-stays";
   await textService.processText({ channel: CH, contactId, text: "a" });
@@ -545,7 +545,7 @@ test("contador permanece no valor do limite após o handoff automático", async 
   assert.equal(result.sessionAfter.misunderstandingCount, 2);
 });
 
-test("mensagem original que disparou o handoff é registrada como processada", async () => {
+test("mensagem que atinge o limite é registrada como processada", async () => {
   const { textService, sessionStore } = makeStack({ maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-registers-id";
   await textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
@@ -553,7 +553,7 @@ test("mensagem original que disparou o handoff é registrada como processada", a
   assert.equal(sessionStore.hasProcessedMessage(sessionKey, "trigger-1"), true);
 });
 
-test("replay da mensagem que disparou o handoff não dispara um segundo handoff", async () => {
+test("replay da mensagem que atinge o limite não conta novamente", async () => {
   const { textService, sessionStore } = makeStack({ maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-no-double";
   await textService.processText({ channel: CH, contactId, messageId: "trigger-1", text: "a" });
@@ -564,18 +564,18 @@ test("replay da mensagem que disparou o handoff não dispara um segundo handoff"
   assert.equal(replay.messages.length, 0);
 });
 
-test("falha técnica no handoff automático não finge sucesso e preserva o limite documentado", async () => {
+test("recuperação não depende de uma segunda persistência de handoff", async () => {
   const base = new InMemoryAgentSessionStore();
-  // A 1ª chamada a update() é o incremento do contador (sucesso); a 2ª é a
-  // persistência do REQUEST_HUMAN dentro do Conversation Service (falha).
-  const broken = wrapUpdateFailingOnCall(base, 2);
+  // A recuperação só faz a persistência normal do contador e do histórico;
+  // não há mais uma atualização adicional para transferir automaticamente.
+  const broken = wrapUpdateFailingOnCall(base, 3);
   const { textService } = makeStack({ sessionStore: broken, maxMisunderstandings: 1, interpretMessage: () => notUnderstood("GENERIC") });
   const contactId = "handoff-tech-failure";
-  await assert.rejects(() => textService.processText({ channel: CH, contactId, messageId: "trigger-x", text: "a" }));
+  await textService.processText({ channel: CH, contactId, messageId: "trigger-x", text: "a" });
   const sessionKey = buildAgentSessionKey(CH, contactId);
   assert.equal(base.get(sessionKey)?.misunderstandingCount, 1);
   assert.equal(base.get(sessionKey)?.underHumanHandoff, false);
-  assert.equal(base.hasProcessedMessage(sessionKey, "trigger-x"), false);
+  assert.equal(base.hasProcessedMessage(sessionKey, "trigger-x"), true);
 });
 
 // --- 37-44: handoff ativo ---
@@ -591,12 +591,11 @@ test("falha técnica no handoff automático não finge sucesso e preserva o limi
 test("mensagem comum durante handoff ativo não chama o Engine nem incrementa o contador", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-common";
-  const first = await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
-  assert.equal(first.policy.handoffTriggered, true);
+  await textService.processText({ channel: CH, contactId, text: "atendente" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "qualquer coisa" });
   assert.equal(result.result, undefined);
-  assert.equal(result.policy.misunderstandingCountAfter, 1);
+  assert.equal(result.policy.misunderstandingCountAfter, 0);
   assert.equal(result.policyResult?.messageKey, "HUMAN_HANDOFF_ACTIVE");
   assert.match(result.messages[0].text, /atendimento já foi encaminhado/);
 });
@@ -604,7 +603,7 @@ test("mensagem comum durante handoff ativo não chama o Engine nem incrementa o 
 test("RESET_CONVERSATION é permitido durante handoff ativo e sai do handoff", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-reset";
-  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "atendente" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "recomeçar" });
   assert.equal(result.interpretation?.deterministic.status, "MATCHED");
@@ -615,7 +614,7 @@ test("RESET_CONVERSATION é permitido durante handoff ativo e sai do handoff", a
 test("RESET_CONVERSATION durante handoff ativo zera o misunderstandingCount", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-reset-zeroes";
-  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "atendente" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "recomeçar" });
   assert.equal(result.policy.counterReset, true);
@@ -625,7 +624,7 @@ test("RESET_CONVERSATION durante handoff ativo zera o misunderstandingCount", as
 test("depois do reset, um novo fluxo pode começar normalmente", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-reset-then-flow";
-  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "atendente" });
   await textService.processText({ channel: CH, contactId, text: "recomeçar" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "oi" });
@@ -638,13 +637,13 @@ test("depois do reset, um novo fluxo pode começar normalmente", async () => {
 test("REQUEST_HUMAN repetido durante handoff ativo não gera nova alteração", async () => {
   const { textService } = makeStack({ maxMisunderstandings: 1 });
   const contactId = "active-repeated-human";
-  await textService.processText({ channel: CH, contactId, text: "sjdfkjhaskdjfh" });
+  await textService.processText({ channel: CH, contactId, text: "atendente" });
 
   const result = await textService.processText({ channel: CH, contactId, text: "atendente" });
   assert.equal(result.interpretation?.deterministic.status, "NOT_UNDERSTOOD");
   assert.equal((result.interpretation?.deterministic as { reason?: string })?.reason, "HUMAN_HANDOFF_ACTIVE");
   assert.equal(result.sessionAfter.underHumanHandoff, true);
-  assert.equal(result.policy.misunderstandingCountAfter, 1);
+  assert.equal(result.policy.misunderstandingCountAfter, 0);
 });
 
 // --- 45-48: persistência e cópias defensivas ---
@@ -734,8 +733,8 @@ test("LLM MATCHED com uma ação executa pelo Conversation Service e zera o cont
 // O validator não enxerga o carrinho, então uma ação plausível como
 // FINISH_CART pode ser aceita por ele e ainda assim ser recusada pelo Engine
 // com CART_EMPTY. Tratar isso como sucesso zeraria o contador e apagaria o
-// progresso rumo ao handoff automático — a rede de segurança nunca dispararia.
-test("LLM MATCHED recusado pelo Engine (CART_EMPTY) não zera o contador e o handoff ainda dispara", async () => {
+// contexto de recuperação da conversa.
+test("LLM MATCHED recusado pelo Engine (CART_EMPTY) não zera o contador nem transfere automaticamente", async () => {
   const { sessionStore, tools } = makeStack();
   const contactId = "llm-engine-refused";
   const sessionKey = buildAgentSessionKey(CH, contactId);
@@ -760,12 +759,25 @@ test("LLM MATCHED recusado pelo Engine (CART_EMPTY) não zera o contador e o han
   assert.equal(refused.policy.misunderstandingCountAfter, 2);
   assert.equal(sessionStore.get(sessionKey)?.misunderstandingCount, 2);
 
-  // O progresso preservado continua valendo: a falha seguinte atinge o limite.
+  // O progresso preservado continua valendo para ajustar a próxima ajuda.
   llmProposesFinishCart = false;
   const next = await textService.processText({ channel: CH, contactId, text: "sei la" });
   assert.equal(next.policy.misunderstandingCountAfter, 3);
-  assert.equal(next.policy.handoffTriggered, true);
-  assert.equal(next.sessionAfter.underHumanHandoff, true);
+  assert.equal(next.policy.handoffTriggered, false);
+  assert.equal(next.sessionAfter.underHumanHandoff, false);
+});
+
+test("LLM identifica produto fora do cardápio e responde sem contar falha", async () => {
+  const { textService } = makeStack({
+    llmMode: "FALLBACK",
+    interpretMessage: () => notUnderstood("GENERIC"),
+    interpretWithLlm: async () => llmNotUnderstood("PRODUCT_NOT_FOUND"),
+  });
+  const result = await textService.processText({ channel: CH, contactId: "llm-product-not-in-menu", text: "quero lasanha" });
+  assert.equal(result.policyResult?.messageKey, "PRODUCT_NOT_IN_MENU");
+  assert.equal(result.policy.misunderstandingCountAfter, 0);
+  assert.equal(result.policy.handoffTriggered, false);
+  assert.match(result.messages[0]?.text ?? "", /não encontrei esse item/i);
 });
 
 test("nenhuma resposta bruta do provider nem prompt aparecem no retorno", async () => {
@@ -1259,9 +1271,9 @@ test("o lock não é global entre instâncias diferentes do serviço", async () 
   await pendingA;
 });
 
-// --- handoff via LLM ---
+// --- recuperação via LLM ---
 
-test("falha do LLM conta para o handoff automático", async () => {
+test("falha do LLM ajusta a recuperação sem handoff automático", async () => {
   const { textService } = makeStack({
     llmMode: "FALLBACK", maxMisunderstandings: 3,
     interpretMessage: () => notUnderstood("GENERIC"),
@@ -1271,21 +1283,14 @@ test("falha do LLM conta para o handoff automático", async () => {
   await textService.processText({ channel: CH, contactId, text: "a" });
   await textService.processText({ channel: CH, contactId, text: "b" });
   const third = await textService.processText({ channel: CH, contactId, text: "c" });
-  assert.equal(third.policy.handoffTriggered, true);
+  assert.equal(third.policy.handoffTriggered, false);
 });
 
-test("terceira falha via LLM dispara o handoff e o LLM não é mais chamado durante ele", async () => {
+test("falhas repetidas via LLM mantêm o agente disponível", async () => {
   let calls = 0;
   const { textService } = makeStack({
     llmMode: "FALLBACK", maxMisunderstandings: 3,
-    // O stub precisa espelhar o contrato real do Deterministic Interpreter
-    // (documentado acima, linha ~530): enquanto session.underHumanHandoff for
-    // true, qualquer texto vira NOT_UNDERSTOOD/HUMAN_HANDOFF_ACTIVE — é o
-    // único caminho que a política reconhece pra não incrementar o contador
-    // de novo e não rechamar o LLM. Um stub que sempre devolve "GENERIC"
-    // (ignorando a sessão) não reproduziria esse contrato e faria a 4ª
-    // chamada dar HUMAN_HANDOFF_AUTOMATIC de novo em vez de _ACTIVE.
-    interpretMessage: input => notUnderstood(input.session.underHumanHandoff ? "HUMAN_HANDOFF_ACTIVE" : "GENERIC"),
+    interpretMessage: () => notUnderstood("GENERIC"),
     interpretWithLlm: async () => { calls += 1; return llmNotUnderstood("GENERIC"); },
   });
   const contactId = "llm-handoff-stops";
@@ -1293,9 +1298,10 @@ test("terceira falha via LLM dispara o handoff e o LLM não é mais chamado dura
   await textService.processText({ channel: CH, contactId, text: "b" });
   await textService.processText({ channel: CH, contactId, text: "c" });
   assert.equal(calls, 3);
-  const afterHandoff = await textService.processText({ channel: CH, contactId, text: "d" });
-  assert.equal(calls, 3);
-  assert.equal(afterHandoff.policyResult?.messageKey, "HUMAN_HANDOFF_ACTIVE");
+  const next = await textService.processText({ channel: CH, contactId, text: "d" });
+  assert.equal(calls, 4);
+  assert.equal(next.policy.handoffTriggered, false);
+  assert.equal(next.sessionAfter.underHumanHandoff, false);
 });
 
 test("PROVIDER_ERROR não dispara handoff mesmo perto do limite", async () => {

@@ -135,9 +135,10 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   // Mensagens da Interpretation Policy (src/agent/text-conversation.service.ts) —
   // tratam contagem de não compreensão, ambiguidade e encaminhamento humano
   // automático. Nunca expõem contador técnico, etapa interna ou messageId.
-  POLICY_NOT_UNDERSTOOD_FIRST: "Não consegui entender. Responda usando uma das opções apresentadas.",
+  POLICY_NOT_UNDERSTOOD_FIRST:
+    "Não peguei essa parte, mas sigo aqui com você 😊 Você pode me dizer de outro jeito ou pedir para ver o cardápio.",
   POLICY_NOT_UNDERSTOOD_REPEATED:
-    "Ainda não consegui identificar sua resposta. Você pode escolher uma das opções ou pedir um atendente.",
+    "Quero te ajudar certinho. Você pode reformular, pedir o cardápio ou, se preferir, falar com um atendente.",
   POLICY_AMBIGUOUS: "Encontrei mais de uma possibilidade. Pode especificar melhor?",
   POLICY_HANDOFF_TRIGGERED: "Não consegui concluir o atendimento automaticamente. Vou encaminhar você para uma pessoa.",
   POLICY_HUMAN_HANDOFF_ACTIVE: "Seu atendimento já foi encaminhado para uma pessoa. Aguarde o contato.",
@@ -161,7 +162,9 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   BUSINESS_PICKUP_HOURS_UNAVAILABLE:
     "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar.",
   OUT_OF_SCOPE_PRODUCT:
-    "Aqui na Brownieria trabalhamos com brownies, não com produtos por quilo 😊 Posso mostrar os sabores e valores disponíveis hoje.",
+    "Não encontrei esse item no cardápio de hoje. Aqui trabalhamos com brownies 😊 Posso mostrar os sabores e valores disponíveis.",
+  PRODUCT_NOT_IN_MENU:
+    "Não encontrei esse item no cardápio de hoje. Aqui trabalhamos com brownies 😊 Posso mostrar os sabores e valores disponíveis ou ajudar a montar seu pedido.",
   CART_TOTAL: "O total atual do seu pedido é {total}.",
   CART_TOTAL_EMPTY: "Seu carrinho ainda está vazio. Posso mostrar o cardápio para você escolher seus brownies.",
   POLICY_SUGGESTIONS_SUFFIX: "Escolha uma destas opções: {options}.",

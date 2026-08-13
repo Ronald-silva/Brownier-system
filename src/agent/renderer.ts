@@ -264,6 +264,9 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "OUT_OF_SCOPE_PRODUCT":
       text = MESSAGE_CATALOG.OUT_OF_SCOPE_PRODUCT;
       break;
+    case "PRODUCT_NOT_IN_MENU":
+      text = MESSAGE_CATALOG.PRODUCT_NOT_IN_MENU;
+      break;
     case "CART_TOTAL":
       text = interpolate(MESSAGE_CATALOG.CART_TOTAL, { total: data?.total });
       break;

@@ -1165,6 +1165,22 @@ export function createTextConversationService(
         };
       }
 
+      // Produto que o modelo não conseguiu resolver no catálogo não é erro
+      // do cliente. É uma pergunta comercial comum: respondemos com clareza
+      // e mantemos a conversa aberta, sem consumir tentativas nem transferir.
+      if (llmOutcome?.status === "NOT_UNDERSTOOD" && llmOutcome.reason.trim().toUpperCase() === "PRODUCT_NOT_FOUND") {
+        if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
+        const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
+        const policyResult: TextConversationPolicyResult = { event: "PRODUCT_NOT_IN_MENU", messageKey: "PRODUCT_NOT_IN_MENU" };
+        return {
+          sessionKey, duplicateMessage: false,
+          interpretation: { deterministic: interpretation, llm: sanitizeLlmOutcomeForResult(llmOutcome), finalSource: "POLICY" },
+          sessionBefore, sessionAfter, policyResult,
+          messages: renderTextConversationPolicyMessage(policyResult),
+          policy: { misunderstandingCountBefore, misunderstandingCountAfter: misunderstandingCountBefore, handoffTriggered: false, counterReset: false },
+        };
+      }
+
       const failure: { status: "NOT_UNDERSTOOD" | "AMBIGUOUS"; suggestions: string[] } =
         llmOutcome?.status === "NOT_UNDERSTOOD"
           ? { status: "NOT_UNDERSTOOD", suggestions: publicSuggestions(llmOutcome.suggestions) }
@@ -1174,18 +1190,16 @@ export function createTextConversationService(
               ? { status: "AMBIGUOUS", suggestions: [] }
               : { status: "NOT_UNDERSTOOD", suggestions: publicSuggestions(interpretation.suggestions) };
 
-      const newCount = misunderstandingCountBefore + 1;
-      const handoffTriggered = newCount >= maxMisunderstandings;
+      // O contador é apenas sinal interno para ajustar a mensagem de ajuda;
+      // ele não bloqueia a conversa nem cresce indefinidamente.
+      const newCount = Math.min(misunderstandingCountBefore + 1, maxMisunderstandings);
+      // Não encaminhamos automaticamente por frases que o sistema não
+      // reconheceu. Um cliente deve poder reformular, mudar de assunto e ver
+      // o cardápio sem ser bloqueado. Handoff continua disponível quando ele
+      // o pede explicitamente ("atendente", "falar com uma pessoa" etc.).
+      const handoffTriggered = false;
 
       let sessionAfter = sessionStore.update(sessionKey, current => ({ ...current, misunderstandingCount: newCount }));
-
-      if (handoffTriggered) {
-        // REQUEST_HUMAN sem messageId: o messageId original só é registrado
-        // depois do handoff ter sucesso, para nunca marcar a mensagem como
-        // processada sem o encaminhamento realmente ter ocorrido.
-        const handoffResult = conversationService.processAction({ channel, contactId, action: { type: "REQUEST_HUMAN" } });
-        sessionAfter = handoffResult.sessionAfter;
-      }
 
       if (messageId) {
         sessionStore.markMessageProcessed(sessionKey, messageId);
@@ -1195,13 +1209,7 @@ export function createTextConversationService(
 
       const remainingAttempts = Math.max(maxMisunderstandings - newCount, 0);
 
-      const policyResult: TextConversationPolicyResult = handoffTriggered
-        ? {
-            event: "HUMAN_HANDOFF_AUTOMATIC",
-            messageKey: "HUMAN_HANDOFF_AUTOMATIC",
-            data: { misunderstandingCount: newCount, handoffSummary: buildHandoffSummary({ session: sessionAfter, intent: "UNRECOGNIZED", lastCustomerMessage: text }) },
-          }
-        : failure.status === "AMBIGUOUS"
+      const policyResult: TextConversationPolicyResult = failure.status === "AMBIGUOUS"
           ? { event: "INTERPRETATION_AMBIGUOUS", messageKey: "INTERPRETATION_AMBIGUOUS", data: { misunderstandingCount: newCount } }
           : {
               event: "INTERPRETATION_NOT_UNDERSTOOD",
