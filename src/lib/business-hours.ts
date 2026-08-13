@@ -66,6 +66,17 @@ export function formatTimeBR(time: string): string {
   return minutesRaw === "00" ? `${hours}h` : `${hours}h${minutesRaw}`;
 }
 
+// Texto curto para atendimento. Fica junto do modelo estruturado para que a
+// resposta ao cliente e o cálculo de "aberto agora" usem a mesma fonte.
+export function formatWeeklyHoursBR(hours: StructuredWeeklyHours): string {
+  const formatDay = (weekday: Weekday) => {
+    const ranges = hours[weekday];
+    if (!ranges.length) return `${WEEKDAY_LABELS_PT_BR[weekday]}: fechado`;
+    return `${WEEKDAY_LABELS_PT_BR[weekday]}: ${ranges.map(range => `${formatTimeBR(range.open)} às ${formatTimeBR(range.close)}`).join(" e ")}`;
+  };
+  return WEEKDAYS.map(formatDay).join("\n");
+}
+
 // Um intervalo que cruza a meia-noite (close <= open) é dividido em dois
 // segmentos absolutos dentro do dia — [open, 24:00) e [00:00, close) — para
 // que sobreposição e "está dentro do intervalo agora" nunca façam a

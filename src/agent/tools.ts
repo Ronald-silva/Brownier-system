@@ -13,7 +13,7 @@ import {
   type BusinessForOrderCreation,
   type StoreLike,
 } from "../lib/orders.ts";
-import { isStructuredWeeklyHours } from "../lib/business-hours.ts";
+import { formatWeeklyHoursBR, isStructuredWeeklyHours } from "../lib/business-hours.ts";
 import { calculateLinePrice } from "../lib/pricing.ts";
 import { getOperatingStatus, type OperatingStatus } from "./operating-status.ts";
 
@@ -183,6 +183,8 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
     },
 
     getBusinessHours() {
+      const structured = store.business.operatingHours;
+      if (isStructuredWeeklyHours(structured)) return formatWeeklyHoursBR(structured);
       return typeof store.business.hours === "string" ? store.business.hours.trim() : "";
     },
 

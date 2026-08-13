@@ -33,6 +33,10 @@ function fail(reason: string): ResponseTextValidationResult {
 // sugestões públicas — telefone (4+ dígitos seguidos), URL e handle nunca
 // passam, autorizados ou não.
 const UNSAFE_CONTACT_PATTERN = /\d{4,}|http|www\.|@/i;
+// Promessas operacionais não verificáveis fazem a conversa parecer atendida,
+// mas não acionam nenhuma ação real. O texto do LLM deve cair no template
+// seguro em vez de prometer retorno, equipe ou confirmação.
+const UNSUPPORTED_PROMISE_PATTERN = /\b(vou verificar|vou confirmar|te passo|aguarde|a equipe|nossa equipe)\b/i;
 
 const MONEY_PATTERN = /R\$\s?(\d{1,4}(?:[.,]\d{2})?)/g;
 const TIME_PATTERN = /\b([01]?\d|2[0-3]):([0-5]\d)\b/g;
@@ -76,6 +80,7 @@ export function validateResponseText(input: ValidateResponseTextInput): Response
     if (typeof text !== "string" || !text.trim()) return fail("EMPTY_TEXT");
     if (text.length > VERBALIZER_RESPONSE_TEXT_MAX_LENGTH) return fail("TEXT_TOO_LONG");
     if (UNSAFE_CONTACT_PATTERN.test(text)) return fail("UNSAFE_CONTACT_MENTION");
+    if (UNSUPPORTED_PROMISE_PATTERN.test(text)) return fail("UNSUPPORTED_OPERATIONAL_PROMISE");
 
     const factsById = new Map(facts.map(fact => [fact.factId, fact] as const));
     for (const id of usedFactIds) {

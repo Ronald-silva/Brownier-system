@@ -8,6 +8,8 @@ export type FactualIntent =
   | { kind: "RESPONSIBLE"; name?: string }
   | { kind: "PAYMENT_OPTIONS" }
   | { kind: "PIX_KEY" }
+  | { kind: "PAYMENT_PROOF" }
+  | { kind: "OPERATING_HOURS" }
   | { kind: "DELIVERY" }
   | { kind: "OUT_OF_SCOPE_PRODUCT" }
   | { kind: "MENU" };
@@ -60,6 +62,10 @@ export function resolveFactualIntent(input: {
   }
 
   const asksNow = words.has("agora") || words.has("hoje") || words.has("horario") || (words.has("ate") && words.has("horas"));
+  const asksWeekend = (words.has("fim") || words.has("finais")) && words.has("semana");
+  const asksSchedule = (words.has("horario") && (words.has("funcionamento") || words.has("funciona"))) || asksWeekend;
+  if (asksSchedule) return { kind: "OPERATING_HOURS" };
+  if (words.has("comprovante")) return { kind: "PAYMENT_PROOF" };
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };

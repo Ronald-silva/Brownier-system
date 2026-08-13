@@ -76,6 +76,16 @@ test("pergunta pela chave PIX é factual", () => {
   assert.equal(resolveFactualIntent({ text: "qual é o pix da loja?" })?.kind, "PIX_KEY");
 });
 
+for (const text of ["qual o horário de funcionamento?", "funciona aos finais de semana?"]) {
+  test(`pergunta pelo horário completo é factual: "${text}"`, () => {
+    assert.equal(resolveFactualIntent({ text })?.kind, "OPERATING_HOURS");
+  });
+}
+
+test("pergunta sobre comprovante de PIX não depende do modelo", () => {
+  assert.equal(resolveFactualIntent({ text: "onde mando o comprovante?" })?.kind, "PAYMENT_PROOF");
+});
+
 for (const text of ["faz entregas?", "tem delivery?"]) {
   test(`pergunta de entrega é factual: "${text}"`, () => {
     assert.equal(resolveFactualIntent({ text })?.kind, "DELIVERY");

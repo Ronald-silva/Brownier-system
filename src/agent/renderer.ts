@@ -282,6 +282,12 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
     case "BUSINESS_PIX_KEY":
       text = interpolate(MESSAGE_CATALOG.BUSINESS_PIX_KEY, { pixKey: data?.pixKey });
       break;
+    case "BUSINESS_PAYMENT_PROOF":
+      text = MESSAGE_CATALOG.BUSINESS_PAYMENT_PROOF;
+      break;
+    case "BUSINESS_OPERATING_HOURS":
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_OPERATING_HOURS, { hours: data?.hours });
+      break;
     case "BUSINESS_PIX_KEY_UNAVAILABLE":
       text = MESSAGE_CATALOG.BUSINESS_PIX_KEY_UNAVAILABLE;
       break;
