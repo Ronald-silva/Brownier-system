@@ -98,11 +98,14 @@ function AgentDemo({ onBack }: { onBack: () => void }) {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const lastMessageRef = useRef<HTMLDivElement | null>(null);
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLInputElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
   const initializedSessionRef = useRef("");
   const send = async (rawText: string) => {
     const text = rawText.trim();
     if (!text || loading) return;
+    shouldStickToBottomRef.current = true;
     setError(""); setDraft(""); setLoading(true);
     setMessages(current => [...current, { id: `visitor-${crypto.randomUUID()}`, author: "visitor", text }]);
     try {
@@ -111,14 +114,27 @@ function AgentDemo({ onBack }: { onBack: () => void }) {
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Não foi possível falar com a assistente."); }
     finally { setLoading(false); }
   };
-  useEffect(() => { lastMessageRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, loading]);
+  useEffect(() => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport || !shouldStickToBottomRef.current) return;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: messages.length <= 1 ? "auto" : "smooth" });
+  }, [messages, loading]);
+  useEffect(() => {
+    if (loading) return;
+    requestAnimationFrame(() => composerInputRef.current?.focus({ preventScroll: true }));
+  }, [loading, sessionId]);
+  const handleMessagesScroll = () => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+    shouldStickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 56;
+  };
   const restart = () => { const nextSession = newDemoSessionId(); setSessionId(nextSession); setMessages([]); setError(""); setDraft(""); };
   useEffect(() => {
     if (initializedSessionRef.current === sessionId) return;
     initializedSessionRef.current = sessionId;
     void send("Olá");
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <section className="section page agent-demo-page"><Back onClick={onBack} /><div className="agent-demo-heading"><div><p className="eyebrow">DEMONSTRAÇÃO AO VIVO</p><h1>A assistente que atende enquanto você produz.</h1><p className="subtle">Este chat usa o mesmo cérebro do atendimento. É uma simulação segura: nenhum pedido é enviado para a produção.</p></div><button className="secondary agent-reset" onClick={restart} disabled={loading}><RotateCcw size={16} aria-hidden="true" /> Recomeçar</button></div><div className="agent-chat" aria-label="Conversa com a assistente"><div className="agent-chat-top"><span className="agent-status"><i /> Assistente Brownieria</span><small>online para demonstração</small></div><div className="agent-messages" aria-live="polite">{messages.map(message => <div className={`agent-message ${message.author}`} key={message.id}><span>{message.text}</span></div>)}{loading && <div className="agent-message agent typing" aria-label="Assistente digitando"><span><i /><i /><i /></span></div>}<div ref={lastMessageRef} /></div><form className="agent-composer" onSubmit={event => { event.preventDefault(); void send(draft); }}><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="Ex.: quais sabores vocês têm?" maxLength={1500} disabled={loading} aria-label="Sua mensagem" /><button className="primary" disabled={loading || !draft.trim()} aria-label="Enviar mensagem"><Send size={18} aria-hidden="true" /></button></form></div>{error && <p className="error">{error}</p>}<div className="agent-prompts"><span>Experimente:</span>{["Quais sabores vocês têm?", "Quero 2 brownies de brigadeiro", "Como posso pagar?"].map(prompt => <button key={prompt} className="choice" onClick={() => void send(prompt)} disabled={loading}>{prompt}</button>)}</div></section>;
+  return <section className="section page agent-demo-page"><Back onClick={onBack} /><div className="agent-demo-heading"><div><p className="eyebrow">DEMONSTRAÇÃO AO VIVO</p><h1>A assistente que atende enquanto você produz.</h1><p className="subtle">Este chat usa o mesmo cérebro do atendimento. É uma simulação segura: nenhum pedido é enviado para a produção.</p></div><button className="secondary agent-reset" onClick={restart} disabled={loading}><RotateCcw size={16} aria-hidden="true" /> Recomeçar</button></div><div className="agent-chat" aria-label="Conversa com a assistente"><div className="agent-chat-top"><span className="agent-status"><i /> Assistente Brownieria</span><small>online para demonstração</small></div><div className="agent-messages" ref={messagesViewportRef} onScroll={handleMessagesScroll} aria-live="polite">{messages.map(message => <div className={`agent-message ${message.author}`} key={message.id}><span>{message.text}</span></div>)}{loading && <div className="agent-message agent typing" aria-label="Assistente digitando"><span><i /><i /><i /></span></div>}</div><form className="agent-composer" onSubmit={event => { event.preventDefault(); void send(draft); }} aria-busy={loading}><input ref={composerInputRef} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Escreva sua mensagem…" maxLength={1500} aria-label="Sua mensagem" autoComplete="off" autoFocus /><button className="primary" disabled={loading || !draft.trim()} aria-label="Enviar mensagem"><Send size={18} aria-hidden="true" /></button></form></div>{error && <p className="error">{error}</p>}<div className="agent-prompts"><span>Experimente:</span>{["Quais sabores vocês têm?", "Quero 2 brownies de brigadeiro", "Como posso pagar?"].map(prompt => <button key={prompt} className="choice" onClick={() => void send(prompt)} disabled={loading}>{prompt}</button>)}</div></section>;
 }
 function Menu({ products, cart, onBack, onProduct, onAdd }: { products: Product[]; cart: CartLine[]; onBack: () => void; onProduct: (p: Product) => void; onAdd: (p: Product) => void }) { const ordered = [...products].sort((a,b) => Number(b.slug === "brigadeiro") - Number(a.slug === "brigadeiro") || Number(b.isFeatured) - Number(a.isFeatured) || Number(b.isAvailable) - Number(a.isAvailable) || a.displayOrder - b.displayOrder); const quantityOf = (id: string) => cart.find(l => l.product.id === id)?.quantity ?? 0; return <section className="section page menu-page"><Back onClick={onBack} /><p className="eyebrow">CARDÁPIO ATUALIZADO</p><h1>Escolha seu momento doce.</h1><p className="subtle">Produzidos em pequenos lotes. Sabores disponíveis aparecem primeiro.</p><h2 className="sr-only">Sabores disponíveis</h2><div className="product-grid menu-grid">{ordered.map(p => <ProductCard key={p.id} product={p} isDay={p.slug === "brigadeiro"} quantity={quantityOf(p.id)} onClick={() => onProduct(p)} onAdd={() => onAdd(p)} />)}</div></section> }
 function ProductCard({ product, isDay = false, quantity = 0, onClick, onAdd }: { key?: string; product: Product; isDay?: boolean; quantity?: number; onClick: () => void; onAdd?: () => void }) {
