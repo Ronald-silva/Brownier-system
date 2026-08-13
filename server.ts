@@ -8,7 +8,7 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool, getDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
-import { BROWNIER_PICKUP_ADDRESS, BROWNIER_PAYMENT_METHODS, BROWNIER_PIX_KEY, BROWNIER_WHATSAPP, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible, ensureBrownierWhatsapp } from "./src/lib/business-defaults.ts";
+import { BROWNIER_DELIVERY_ENABLED, BROWNIER_HOURS_VERSION, BROWNIER_PICKUP_ADDRESS, BROWNIER_PAYMENT_METHODS, BROWNIER_PIX_KEY, BROWNIER_WHATSAPP, ensureBrownierDeliveryEnabled, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible, ensureBrownierWhatsapp } from "./src/lib/business-defaults.ts";
 import { validateStructuredWeeklyHours } from "./src/lib/business-hours.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
 import { createPostgresConversationState } from "./src/agent/postgres-conversation-state.ts";
@@ -98,7 +98,7 @@ function verifyAdminSessionToken(token: string | undefined): boolean {
 const demoStore: Store = {
   business: {
     name: "Brownieria Fortal", tagline: "Brownies artesanais para tornar seu dia mais doce", description: "Veja os sabores disponíveis hoje e monte seu pedido em poucos minutos.",
-    phone: "", whatsapp: BROWNIER_WHATSAPP, address: BROWNIER_PICKUP_ADDRESS, hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
+    phone: "", whatsapp: BROWNIER_WHATSAPP, address: BROWNIER_PICKUP_ADDRESS, hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: BROWNIER_DELIVERY_ENABLED,
     pickupSlots: [],
     paymentMethods: [...BROWNIER_PAYMENT_METHODS], deliveryFee: 0,
     pixKey: BROWNIER_PIX_KEY,
@@ -129,7 +129,8 @@ async function loadStore(): Promise<Store> {
   const withResponsible = ensureBrownierResponsible(withOperatingHours);
   const withPixKey = ensureBrownierPixKey(withResponsible);
   const withWhatsapp = ensureBrownierWhatsapp(withPixKey);
-  const withPaymentMethods = ensureBrownierPaymentMethods(withWhatsapp);
+  const withDelivery = ensureBrownierDeliveryEnabled(withWhatsapp);
+  const withPaymentMethods = ensureBrownierPaymentMethods(withDelivery);
   if (withPaymentMethods !== store) await saveStore(withPaymentMethods);
   return withPaymentMethods;
 }
@@ -272,7 +273,7 @@ async function startServer() {
       const errors = validateStructuredWeeklyHours(body.operatingHours);
       if (errors.length > 0) return res.status(400).json({ error: "Horário de funcionamento inválido.", details: errors });
     }
-    const store = await loadStore(); store.business = { ...store.business, ...body, name: "Brownieria Fortal" }; await saveStore(store); res.json(store.business);
+    const store = await loadStore(); store.business = { ...store.business, ...body, ...(body.operatingHours !== undefined ? { operatingHoursVersion: BROWNIER_HOURS_VERSION } : {}), name: "Brownieria Fortal" }; await saveStore(store); res.json(store.business);
   });
   app.post("/api/admin/products", admin, adminProductBody, async (req, res) => {
     const store = await loadStore(); const body = req.body ?? {};

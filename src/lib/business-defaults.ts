@@ -5,6 +5,8 @@ export const BROWNIER_RESPONSIBLE_NAME = "Mateus";
 export const BROWNIER_PIX_KEY = "38.011.069/0001-93";
 export const BROWNIER_WHATSAPP = "+55 85 9145-7889";
 export const BROWNIER_PAYMENT_METHODS = ["PIX", "DINHEIRO"] as const;
+export const BROWNIER_DELIVERY_ENABLED = false;
+export const BROWNIER_HOURS_VERSION = 2;
 
 type StoreWithBusiness = { business: Record<string, unknown> };
 
@@ -50,18 +52,26 @@ export function ensureBrownierPaymentMethods<T extends StoreWithBusiness>(store:
   return { ...store, business: { ...store.business, paymentMethods: [...BROWNIER_PAYMENT_METHODS] } };
 }
 
+export function ensureBrownierDeliveryEnabled<T extends StoreWithBusiness>(store: T): T {
+  if (store.business.deliveryEnabled === BROWNIER_DELIVERY_ENABLED) return store;
+  return { ...store, business: { ...store.business, deliveryEnabled: BROWNIER_DELIVERY_ENABLED } };
+}
+
 // Backfill idempotente do horário estruturado: só preenche quando
 // `business.operatingHours` está ausente ou já não é um horário estruturado
 // válido — instalações que já têm horário cadastrado pelo painel nunca são
 // sobrescritas. Mesmo padrão de `ensureBrownierPickupAddress`: função pura,
 // devolve a MESMA referência quando nada muda.
 export function ensureBrownierOperatingHours<T extends StoreWithBusiness>(store: T): T {
-  if (isStructuredWeeklyHours(store.business.operatingHours)) return store;
+  // Migração versionada: aplica a agenda oficial nova uma única vez às lojas
+  // antigas; edições posteriores feitas no painel preservam a mesma versão.
+  if (store.business.operatingHoursVersion === BROWNIER_HOURS_VERSION && isStructuredWeeklyHours(store.business.operatingHours)) return store;
   return {
     ...store,
     business: {
       ...store.business,
       operatingHours: INITIAL_OPERATING_HOURS,
+      operatingHoursVersion: BROWNIER_HOURS_VERSION,
     },
   };
 }

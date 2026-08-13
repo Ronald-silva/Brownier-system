@@ -36,14 +36,15 @@ export type TimeRange = { open: string; close: string };
 // separada para não abrir espaço para os dois campos se contradizerem.
 export type StructuredWeeklyHours = Record<Weekday, TimeRange[]>;
 
-// Horário inicial pedido: seg-sex 08:00–18:00, sáb 08:00–12:00, dom fechado.
+// Horário comercial oficial: entregas/atendimento de segunda a sexta,
+// 14h–22h; sábado e domingo fechados.
 export const INITIAL_OPERATING_HOURS: StructuredWeeklyHours = {
-  MON: [{ open: "08:00", close: "18:00" }],
-  TUE: [{ open: "08:00", close: "18:00" }],
-  WED: [{ open: "08:00", close: "18:00" }],
-  THU: [{ open: "08:00", close: "18:00" }],
-  FRI: [{ open: "08:00", close: "18:00" }],
-  SAT: [{ open: "08:00", close: "12:00" }],
+  MON: [{ open: "14:00", close: "22:00" }],
+  TUE: [{ open: "14:00", close: "22:00" }],
+  WED: [{ open: "14:00", close: "22:00" }],
+  THU: [{ open: "14:00", close: "22:00" }],
+  FRI: [{ open: "14:00", close: "22:00" }],
+  SAT: [],
   SUN: [],
 };
 

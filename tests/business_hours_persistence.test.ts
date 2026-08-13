@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { loadStoreFile, saveStoreFile } from "../src/lib/store.ts";
-import { ensureBrownierOperatingHours } from "../src/lib/business-defaults.ts";
+import { BROWNIER_HOURS_VERSION, ensureBrownierOperatingHours } from "../src/lib/business-defaults.ts";
 import { INITIAL_OPERATING_HOURS, type StructuredWeeklyHours } from "../src/lib/business-hours.ts";
 
 type FakeStore = { business: Record<string, unknown>; products: unknown[]; orders: unknown[] };
@@ -42,7 +42,7 @@ test("alteração feita pelo painel persiste após reinício e o backfill nunca 
 
     // Simula PUT /api/admin/business com operatingHours customizado (domingo passa a abrir).
     const customHours: StructuredWeeklyHours = { ...INITIAL_OPERATING_HOURS, SUN: [{ open: "10:00", close: "14:00" }] };
-    const afterAdminEdit = { ...boot1, business: { ...boot1.business, operatingHours: customHours } };
+    const afterAdminEdit = { ...boot1, business: { ...boot1.business, operatingHours: customHours, operatingHoursVersion: BROWNIER_HOURS_VERSION } };
     await saveStoreFile(storePath, afterAdminEdit);
 
     // "Restart" após a alteração do painel.

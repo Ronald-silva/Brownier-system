@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWNIER_PAYMENT_METHODS, BROWNIER_PICKUP_ADDRESS, BROWNIER_PIX_KEY, BROWNIER_RESPONSIBLE_NAME, BROWNIER_WHATSAPP, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible, ensureBrownierWhatsapp } from "../src/lib/business-defaults.ts";
+import { BROWNIER_DELIVERY_ENABLED, BROWNIER_HOURS_VERSION, BROWNIER_PAYMENT_METHODS, BROWNIER_PICKUP_ADDRESS, BROWNIER_PIX_KEY, BROWNIER_RESPONSIBLE_NAME, BROWNIER_WHATSAPP, ensureBrownierDeliveryEnabled, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible, ensureBrownierWhatsapp } from "../src/lib/business-defaults.ts";
 import { INITIAL_OPERATING_HOURS } from "../src/lib/business-hours.ts";
 
 test("a semente comercial usa o endereço oficial de retirada", () => {
@@ -56,12 +56,18 @@ test("backfill mantém somente PIX e dinheiro como formas aceitas", () => {
   assert.deepEqual(result.business.paymentMethods, ["PIX", "DINHEIRO"]);
 });
 
+test("backfill mantém entregas desabilitadas conforme a informação comercial oficial", () => {
+  const store: { business: Record<string, unknown>; products: unknown[]; orders: unknown[] } = { business: { deliveryEnabled: false }, products: [], orders: [] };
+  assert.equal(ensureBrownierDeliveryEnabled(store).business.deliveryEnabled, BROWNIER_DELIVERY_ENABLED);
+});
+
 test("backfill de horário: preenche o horário inicial quando não há operatingHours cadastrado", () => {
   const store: { business: Record<string, unknown>; products: unknown[]; orders: unknown[] } = {
     business: { name: "Brownieria Fortal", hours: "" }, products: [], orders: [],
   };
   const result = ensureBrownierOperatingHours(store);
   assert.deepEqual(result.business.operatingHours, INITIAL_OPERATING_HOURS);
+  assert.equal(result.business.operatingHoursVersion, BROWNIER_HOURS_VERSION);
   assert.equal(result.business.name, "Brownieria Fortal");
   // Store original não é mutado.
   assert.equal(store.business.operatingHours, undefined);
@@ -69,7 +75,7 @@ test("backfill de horário: preenche o horário inicial quando não há operatin
 
 test("backfill de horário é idempotente: nunca sobrescreve um horário já cadastrado pelo painel", () => {
   const customHours = { ...INITIAL_OPERATING_HOURS, SUN: [{ open: "10:00", close: "14:00" }] };
-  const store = { business: { operatingHours: customHours }, products: [], orders: [] };
+  const store = { business: { operatingHours: customHours, operatingHoursVersion: BROWNIER_HOURS_VERSION }, products: [], orders: [] };
   assert.equal(ensureBrownierOperatingHours(store), store);
   assert.deepEqual(store.business.operatingHours, customHours);
 });
