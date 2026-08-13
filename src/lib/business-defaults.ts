@@ -2,6 +2,8 @@ import { INITIAL_OPERATING_HOURS, isStructuredWeeklyHours } from "./business-hou
 
 export const BROWNIER_PICKUP_ADDRESS = "Rua Professor Leite Gondim, 896, Antônio Bezerra, Fortaleza – CE, CEP 60360-332";
 export const BROWNIER_RESPONSIBLE_NAME = "Mateus";
+export const BROWNIER_PIX_KEY = "38.011.069/0001-93";
+export const BROWNIER_PAYMENT_METHODS = ["PIX", "DINHEIRO"] as const;
 
 type StoreWithBusiness = { business: Record<string, unknown> };
 
@@ -24,6 +26,20 @@ export function ensureBrownierPickupAddress<T extends StoreWithBusiness>(store: 
 export function ensureBrownierResponsible<T extends StoreWithBusiness>(store: T): T {
   if (store.business.responsibleName === BROWNIER_RESPONSIBLE_NAME) return store;
   return { ...store, business: { ...store.business, responsibleName: BROWNIER_RESPONSIBLE_NAME } };
+}
+
+// Chave PIX comercial confirmada. O backfill aplica o dado em instalações
+// existentes, para que o atendimento nunca precise inventar informação de
+// pagamento nem encaminhar uma dúvida simples.
+export function ensureBrownierPixKey<T extends StoreWithBusiness>(store: T): T {
+  if (store.business.pixKey === BROWNIER_PIX_KEY) return store;
+  return { ...store, business: { ...store.business, pixKey: BROWNIER_PIX_KEY } };
+}
+
+export function ensureBrownierPaymentMethods<T extends StoreWithBusiness>(store: T): T {
+  const current = store.business.paymentMethods;
+  if (Array.isArray(current) && current.length === BROWNIER_PAYMENT_METHODS.length && current.every((value, index) => value === BROWNIER_PAYMENT_METHODS[index])) return store;
+  return { ...store, business: { ...store.business, paymentMethods: [...BROWNIER_PAYMENT_METHODS] } };
 }
 
 // Backfill idempotente do horário estruturado: só preenche quando

@@ -367,6 +367,11 @@ test("renderTextConversationPolicyMessage não inventa chave PIX ausente", () =>
   assert.match(messages[0].text, /ainda não está cadastrada/i);
 });
 
+test("renderTextConversationPolicyMessage mostra a chave PIX fornecida pela loja", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "BUSINESS_PIX_KEY", data: { pixKey: "38.011.069/0001-93" } });
+  assert.match(messages[0].text, /38\.011\.069\/0001-93/);
+});
+
 test("renderTextConversationPolicyMessage redireciona produto fora do cardápio sem handoff", () => {
   const messages = renderTextConversationPolicyMessage({ messageKey: "OUT_OF_SCOPE_PRODUCT" });
   assert.match(messages[0].text, /brownies/i);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWNIER_PICKUP_ADDRESS, BROWNIER_RESPONSIBLE_NAME, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierResponsible } from "../src/lib/business-defaults.ts";
+import { BROWNIER_PAYMENT_METHODS, BROWNIER_PICKUP_ADDRESS, BROWNIER_PIX_KEY, BROWNIER_RESPONSIBLE_NAME, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible } from "../src/lib/business-defaults.ts";
 import { INITIAL_OPERATING_HOURS } from "../src/lib/business-hours.ts";
 
 test("a semente comercial usa o endereço oficial de retirada", () => {
@@ -32,6 +32,21 @@ test("backfill cadastra Mateus como responsável comercial", () => {
   assert.equal(BROWNIER_RESPONSIBLE_NAME, "Mateus");
   assert.equal(result.business.responsibleName, "Mateus");
   assert.equal(store.business.responsibleName, undefined);
+});
+
+test("backfill cadastra a chave PIX comercial oficial", () => {
+  const store: { business: Record<string, unknown>; products: unknown[]; orders: unknown[] } = { business: {}, products: [], orders: [] };
+  const result = ensureBrownierPixKey(store);
+  assert.equal(BROWNIER_PIX_KEY, "38.011.069/0001-93");
+  assert.equal(result.business.pixKey, BROWNIER_PIX_KEY);
+  assert.equal(store.business.pixKey, undefined);
+});
+
+test("backfill mantém somente PIX e dinheiro como formas aceitas", () => {
+  const store: { business: Record<string, unknown>; products: unknown[]; orders: unknown[] } = { business: { paymentMethods: ["PIX", "DINHEIRO", "A_COMBINAR"] }, products: [], orders: [] };
+  const result = ensureBrownierPaymentMethods(store);
+  assert.deepEqual(BROWNIER_PAYMENT_METHODS, ["PIX", "DINHEIRO"]);
+  assert.deepEqual(result.business.paymentMethods, ["PIX", "DINHEIRO"]);
 });
 
 test("backfill de horário: preenche o horário inicial quando não há operatingHours cadastrado", () => {

@@ -8,7 +8,7 @@ import { resolveStorePath, loadStoreFile, saveStoreFile } from "./src/lib/store.
 import { createOrder, OrderCreationError, type Order } from "./src/lib/orders.ts";
 import { closeDatabasePool, getDatabasePool } from "./src/lib/database.ts";
 import { createHealthHandler } from "./src/lib/health.ts";
-import { BROWNIER_PICKUP_ADDRESS, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierResponsible } from "./src/lib/business-defaults.ts";
+import { BROWNIER_PICKUP_ADDRESS, BROWNIER_PAYMENT_METHODS, BROWNIER_PIX_KEY, ensureBrownierPaymentMethods, ensureBrownierPickupAddress, ensureBrownierOperatingHours, ensureBrownierPixKey, ensureBrownierResponsible } from "./src/lib/business-defaults.ts";
 import { validateStructuredWeeklyHours } from "./src/lib/business-hours.ts";
 import { createWhatsappConversationRuntime } from "./src/agent/whatsapp-conversation.runtime.ts";
 import { createPostgresConversationState } from "./src/agent/postgres-conversation-state.ts";
@@ -100,7 +100,8 @@ const demoStore: Store = {
     name: "Brownieria Fortal", tagline: "Brownies artesanais para tornar seu dia mais doce", description: "Veja os sabores disponíveis hoje e monte seu pedido em poucos minutos.",
     phone: "", whatsapp: "", address: BROWNIER_PICKUP_ADDRESS, hours: "", instagram: "", pickupEnabled: true, deliveryEnabled: true,
     pickupSlots: [],
-    paymentMethods: ["PIX", "DINHEIRO", "A_COMBINAR"], deliveryFee: 0,
+    paymentMethods: [...BROWNIER_PAYMENT_METHODS], deliveryFee: 0,
+    pixKey: BROWNIER_PIX_KEY,
     receivedMessage: "Recebemos seu pedido! A equipe vai confirmar os detalhes em breve.",
     availabilityNotice: "Os sabores podem variar conforme a disponibilidade.",
     isDemo: true,
@@ -126,8 +127,10 @@ async function loadStore(): Promise<Store> {
   const withOfficialAddress = ensureBrownierPickupAddress(store);
   const withOperatingHours = ensureBrownierOperatingHours(withOfficialAddress);
   const withResponsible = ensureBrownierResponsible(withOperatingHours);
-  if (withResponsible !== store) await saveStore(withResponsible);
-  return withResponsible;
+  const withPixKey = ensureBrownierPixKey(withResponsible);
+  const withPaymentMethods = ensureBrownierPaymentMethods(withPixKey);
+  if (withPaymentMethods !== store) await saveStore(withPaymentMethods);
+  return withPaymentMethods;
 }
 async function saveStore(store: Store) { return saveStoreFile(storePath, store); }
 function publicProduct(product: Product) {
