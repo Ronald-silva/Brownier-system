@@ -7,7 +7,7 @@
     "node": ">=22.6.0"
   },
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "node --env-file-if-exists=.env --experimental-strip-types server.ts",
     "start": "node --experimental-strip-types server.ts",
     "build": "vite build --configLoader runner",
     "preview": "vite preview",

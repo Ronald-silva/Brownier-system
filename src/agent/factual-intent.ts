@@ -4,6 +4,7 @@ import type { OperatingStatus } from "./operating-status.ts";
 export type FactualIntent =
   | { kind: "ADDRESS"; address?: string }
   | { kind: "PICKUP_AVAILABILITY"; status: OperatingStatus }
+  | { kind: "CART_TOTAL" }
   | { kind: "MENU" };
 
 function tokens(text: string): Set<string> {
@@ -44,6 +45,13 @@ export function resolveFactualIntent(input: {
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };
+  }
+
+  // "total" é sempre sobre o pedido em andamento. Tratamos antes do
+  // cardápio, pois frases como "qual o valor total?" não devem reabrir o
+  // menu nem depender de uma chamada ao modelo.
+  if (words.has("total") || words.has("subtotal")) {
+    return { kind: "CART_TOTAL" };
   }
 
   if (words.has("menu") || words.has("cardapio") || words.has("sabores") || words.has("preco") || words.has("precos")) {

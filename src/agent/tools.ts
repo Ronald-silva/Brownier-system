@@ -14,6 +14,7 @@ import {
   type StoreLike,
 } from "../lib/orders.ts";
 import { isStructuredWeeklyHours } from "../lib/business-hours.ts";
+import { calculateLinePrice } from "../lib/pricing.ts";
 import { getOperatingStatus, type OperatingStatus } from "./operating-status.ts";
 
 export class AgentToolError extends Error {
@@ -73,6 +74,16 @@ export type AgentPublicBusiness = {
   paymentMethods: string[];
 };
 
+// Orçamento público calculado pela mesma regra usada na criação definitiva
+// do pedido. O modelo nunca calcula nem recebe autorização para alterar
+// valores; ele só pode verbalizar este resultado já apurado pelo servidor.
+export type AgentCartQuote = {
+  items: Array<{ productId: string; name: string; quantity: number; unitPrice: number; totalPrice: number }>;
+  subtotal: number;
+  discount: number;
+  total: number;
+};
+
 export type AgentToolsDependencies = {
   store: AgentDomainStore;
   now?: () => Date;
@@ -96,6 +107,7 @@ export type AgentTools = {
   // Fato determinístico de "está aberto agora" — calculado no servidor a
   // partir do relógio real, nunca pelo modelo. Ver operating-status.ts.
   getOperatingStatus?(): OperatingStatus;
+  quoteCart?(items: Array<{ productId: string; quantity: number }>): AgentCartQuote | null;
   getPickupSlots(): string[];
   validatePickupTime(time: string): boolean;
   createOrder(input: { payload: CreateOrderPayload; idempotencyKey?: string }): CreateOrderResult;
@@ -167,6 +179,26 @@ export function createAgentTools(deps: AgentToolsDependencies): AgentTools {
     getOperatingStatus() {
       const structured = store.business.operatingHours;
       return getOperatingStatus({ now: now(), hours: isStructuredWeeklyHours(structured) ? structured : undefined });
+    },
+
+    quoteCart(items) {
+      if (!Array.isArray(items) || items.length === 0) return null;
+      const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+      if (!Number.isInteger(totalQuantity) || totalQuantity < 1) return null;
+
+      const quotedItems: AgentCartQuote["items"] = [];
+      let subtotal = 0;
+      let discount = 0;
+      for (const item of items) {
+        if (!item || typeof item.productId !== "string" || !Number.isInteger(item.quantity) || item.quantity < 1) return null;
+        const product = store.products.find(product => product.id === item.productId && product.isActive && product.isAvailable);
+        if (!product) return null;
+        const price = calculateLinePrice(product, item.quantity, totalQuantity);
+        quotedItems.push({ productId: product.id, name: product.name, quantity: item.quantity, unitPrice: price.unitPrice, totalPrice: price.total });
+        subtotal += price.total;
+        discount += price.discount;
+      }
+      return { items: quotedItems, subtotal, discount, total: subtotal };
     },
 
     getPickupSlots() {
