@@ -316,6 +316,11 @@ test("runtime WhatsApp preserva a sessão quando a saída NVIDIA é inválida ou
   const store = domainStore();
   const nvidiaClient = new FakeNvidiaClient([
     '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"inventado","quantity":1}]}',
+    // Segunda entrada: o interpreter tenta de novo uma única vez quando a
+    // primeira saída é REJECTED pelo validador — sem essa entrada extra na
+    // fila, o retry consumiria a resposta destinada à segunda mensagem
+    // ("me ajuda com isso") abaixo, embaralhando o cenário do teste.
+    '{"status":"MATCHED","actions":[{"type":"ADD_ITEM","productId":"inventado","quantity":1}]}',
     new NvidiaNemotronLlmProviderError("NVIDIA_TIMEOUT", true),
   ]);
   const runtime = createWhatsappConversationRuntime({

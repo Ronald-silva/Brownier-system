@@ -86,6 +86,7 @@ export type LlmInterpretationMatched = {
   intent?: ConversationIntent;
   responseIntent?: ResponseIntent;
   confidence?: "HIGH" | "LOW";
+  retried?: boolean;
 };
 
 export type LlmInterpretationNotUnderstood = {
@@ -98,6 +99,7 @@ export type LlmInterpretationNotUnderstood = {
   intent?: ConversationIntent;
   responseIntent?: ResponseIntent;
   confidence?: "HIGH" | "LOW";
+  retried?: boolean;
 };
 
 export type LlmInterpretationCandidate = {
@@ -115,6 +117,7 @@ export type LlmInterpretationAmbiguous = {
   intent?: ConversationIntent;
   responseIntent?: ResponseIntent;
   confidence?: "HIGH" | "LOW";
+  retried?: boolean;
 };
 
 // Saída do provider foi recebida, mas rejeitada localmente (ação proibida,
@@ -125,6 +128,11 @@ export type LlmInterpretationRejected = {
   source: "VALIDATOR";
   promptVersion: string;
   durationMs: number;
+  // true quando essa saída só chegou depois de uma segunda tentativa (a
+  // primeira também foi REJECTED pelo validador) — ver retry em
+  // llm-interpreter.ts. Ausente/false significa que a primeira tentativa
+  // já bastou (ou já era esse REJECTED final, sem retry).
+  retried?: boolean;
 };
 
 // Falha técnica do provider (timeout, Promise rejeitada) — nunca usada para

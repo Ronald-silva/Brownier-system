@@ -578,3 +578,101 @@ test("o logging permanente não altera o resultado devolvido por interpret()", a
     }
   });
 });
+
+// --- retry único quando a validação local rejeita a saída (REJECTED) ------
+// Providers sem enforcement de schema no nível da API (ex.: DeepSeek) erram
+// o formato ocasionalmente mesmo com o prompt certo; uma segunda tentativa
+// dá uma segunda chance antes de desistir. Nunca se aplica a PROVIDER_ERROR
+// (falha técnica), que já tem seu próprio tratamento/retryable.
+
+test("retry: REJECTED na primeira tentativa e MATCHED válida na segunda usa a segunda, com retried:true", async () => {
+  let call = 0;
+  const provider = new FakeLlmProvider(async () => {
+    call += 1;
+    // CONFIRM_ORDER fora de AWAITING_CONFIRMATION é sempre REJECTED.
+    if (call === 1) return { status: "MATCHED", actions: [{ type: "CONFIRM_ORDER" }] };
+    return { status: "MATCHED", actions: [{ type: "SHOW_MENU" }] };
+  });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BUILDING_ORDER") });
+  assert.equal(provider.calls.length, 2);
+  assert.equal(result.status, "MATCHED");
+  if (result.status === "MATCHED") {
+    assert.deepEqual(result.actions, [{ type: "SHOW_MENU" }]);
+    assert.equal(result.retried, true);
+  }
+});
+
+test("retry: REJECTED nas duas tentativas retorna REJECTED com retried:true", async () => {
+  const provider = fixedProvider({ status: "MATCHED", actions: [{ type: "CONFIRM_ORDER" }] });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BUILDING_ORDER") });
+  assert.equal(provider.calls.length, 2);
+  assert.equal(result.status, "REJECTED");
+  if (result.status === "REJECTED") assert.equal(result.retried, true);
+});
+
+test("retry: MATCHED válida já na primeira tentativa não dispara segunda chamada nem seta retried", async () => {
+  const provider = fixedProvider({ status: "MATCHED", actions: [{ type: "SHOW_MENU" }] });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BROWSING_MENU") });
+  assert.equal(provider.calls.length, 1);
+  assert.equal(result.status, "MATCHED");
+  if (result.status === "MATCHED") assert.equal(result.retried, undefined);
+});
+
+test("retry: NOT_UNDERSTOOD/AMBIGUOUS na primeira tentativa não dispara retry (só REJECTED dispara)", async () => {
+  const provider = fixedProvider({ status: "NOT_UNDERSTOOD", reason: "GENERIC" });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BROWSING_MENU") });
+  assert.equal(provider.calls.length, 1);
+  assert.equal(result.status, "NOT_UNDERSTOOD");
+});
+
+test("retry: PROVIDER_ERROR na primeira chamada nunca dispara retry (erro técnico tem tratamento próprio)", async () => {
+  const provider = new FakeLlmProvider(async () => {
+    throw new Error("boom");
+  });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BROWSING_MENU") });
+  assert.equal(provider.calls.length, 1);
+  assert.equal(result.status, "PROVIDER_ERROR");
+});
+
+test("retry: segunda chamada falha tecnicamente após a primeira ser REJECTED — mantém REJECTED original, nunca vira PROVIDER_ERROR", async () => {
+  let call = 0;
+  const provider = new FakeLlmProvider(async () => {
+    call += 1;
+    if (call === 1) return { status: "MATCHED", actions: [{ type: "CONFIRM_ORDER" }] };
+    throw new Error("network boom on retry");
+  });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BUILDING_ORDER") });
+  assert.equal(provider.calls.length, 2);
+  assert.equal(result.status, "REJECTED");
+  if (result.status === "REJECTED") assert.equal(result.retried, true);
+});
+
+test("retry: durationMs reflete as duas tentativas somadas, não só a primeira", async () => {
+  let call = 0;
+  const provider = new FakeLlmProvider(async () => {
+    call += 1;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    if (call === 1) return { status: "MATCHED", actions: [{ type: "CONFIRM_ORDER" }] };
+    return { status: "MATCHED", actions: [{ type: "SHOW_MENU" }] };
+  });
+  const interpreter = createLlmInterpreter({ provider });
+  const result = await interpreter.interpret({ text: "oi", session: atStep("BUILDING_ORDER") });
+  assert.ok(result.durationMs >= 35, `esperava durationMs >= 35 (duas chamadas de ~20ms), veio ${result.durationMs}`);
+});
+
+test("retry: log de llm_planning_call inclui retried:true só quando de fato retentou", async () => {
+  await withConsoleLogSpy(async calls => {
+    const provider = fixedProvider({ status: "MATCHED", actions: [{ type: "CONFIRM_ORDER" }] });
+    const interpreter = createLlmInterpreter({ provider });
+    await interpreter.interpret({ text: "oi", session: atStep("BUILDING_ORDER") });
+    const [logged] = calls.at(-1)!;
+    const parsed = JSON.parse(logged as string);
+    assert.equal(parsed.retried, true);
+  });
+});

@@ -117,6 +117,7 @@ function logPlanningCall(result: LlmInterpretationResult): void {
   if ((result.status === "MATCHED" || result.status === "NOT_UNDERSTOOD" || result.status === "AMBIGUOUS") && result.confidence) {
     entry.confidence = result.confidence;
   }
+  if (result.status !== "PROVIDER_ERROR" && "retried" in result && result.retried) entry.retried = true;
   console.log(JSON.stringify(entry));
 }
 
@@ -183,8 +184,43 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
         });
       }
 
-      const durationMs = Date.now() - startedAt;
-      const validated = validateLlmOutput({ raw, session, context, maxOutputLength });
+      const durationMsFirstAttempt = Date.now() - startedAt;
+      let validated = validateLlmOutput({ raw, session, context, maxOutputLength });
+      let durationMs = durationMsFirstAttempt;
+      let retried = false;
+
+      // Retry único quando a saída falha a validação local (schema/regras
+      // de negócio), nunca quando o provider já falhou tecnicamente (isso
+      // é PROVIDER_ERROR, tratado acima, com sua própria semântica de
+      // retryable — não duplicar aqui). Providers sem enforcement de schema
+      // no nível da API (ex.: DeepSeek, que só garante JSON válido, não a
+      // forma exata) erram o formato ocasionalmente mesmo com o prompt
+      // certo; uma segunda chamada geralmente resolve, sem custo perceptível
+      // pro usuário (a latência já é sub-2s hoje). Se a segunda tentativa
+      // falhar tecnicamente (rede/timeout), mantém o REJECTED da primeira —
+      // nunca vira PROVIDER_ERROR a essa altura, pois a primeira tentativa
+      // já produziu uma saída real (só inválida), não um erro de rede.
+      if (validated.status === "REJECTED") {
+        retried = true;
+        try {
+          const retryRaw = await withTimeout(
+            provider.generateStructuredOutput({
+              systemPrompt,
+              userPrompt,
+              schemaName: "llm_interpreter_output_v1",
+              timeoutMs,
+            }),
+            timeoutMs,
+          );
+          validated = validateLlmOutput({ raw: retryRaw, session, context, maxOutputLength });
+        } catch {
+          // Segunda chamada falhou tecnicamente — fica com o REJECTED
+          // original; `validated` já é o resultado da primeira tentativa.
+          // `retried` continua true: a tentativa aconteceu, só não deu em
+          // nada — não é a mesma coisa que nunca ter tentado.
+        }
+        durationMs = Date.now() - startedAt;
+      }
 
       if (validated.status === "MATCHED") {
         // TEMPORÁRIO — logging de causa raiz para o incidente de SHOW_MENU
@@ -212,6 +248,7 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           ...(validated.intent ? { intent: validated.intent } : {}),
           ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
           ...(validated.confidence ? { confidence: validated.confidence } : {}),
+          ...(retried ? { retried: true } : {}),
         });
       }
       if (validated.status === "NOT_UNDERSTOOD") {
@@ -225,6 +262,7 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           ...(validated.intent ? { intent: validated.intent } : {}),
           ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
           ...(validated.confidence ? { confidence: validated.confidence } : {}),
+          ...(retried ? { retried: true } : {}),
         });
       }
       if (validated.status === "AMBIGUOUS") {
@@ -238,6 +276,7 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
           ...(validated.intent ? { intent: validated.intent } : {}),
           ...(validated.responseIntent ? { responseIntent: validated.responseIntent } : {}),
           ...(validated.confidence ? { confidence: validated.confidence } : {}),
+          ...(retried ? { retried: true } : {}),
         });
       }
       return logAndReturn({
@@ -246,6 +285,7 @@ export function createLlmInterpreter(input: CreateLlmInterpreterInput): LlmInter
         source: "VALIDATOR",
         promptVersion: LLM_INTERPRETER_PROMPT_VERSION,
         durationMs,
+        ...(retried ? { retried: true } : {}),
       });
     },
   };

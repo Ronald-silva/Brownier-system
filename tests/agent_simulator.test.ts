@@ -1256,7 +1256,10 @@ test("OPENAI_FALLBACK: saída inválida do cliente fake não executa nenhuma aç
     contactId: "c-invalid",
     text: "quero mandar ver nesse pedido bagunçado",
   });
-  assert.equal(client.calls.length, 1);
+  // O interpreter tenta de novo uma única vez quando a validação rejeita a
+  // saída (REJECTED) — o cliente fake sempre devolve o mesmo JSON inválido,
+  // então a segunda tentativa também é REJECTED: 2 chamadas, não 1.
+  assert.equal(client.calls.length, 2);
   assert.equal(result.result, undefined);
   assert.deepEqual(result.sessionAfter.items, sessionBefore.items);
 });

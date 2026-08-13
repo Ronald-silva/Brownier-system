@@ -55,7 +55,11 @@ async function interpret(input: {
     session: session(input.step),
     context: input.context,
   });
-  assert.equal(provider.calls.length, 1);
+  // O interpreter tenta de novo uma única vez quando a validação local
+  // rejeita a saída (REJECTED) — por isso 2 chamadas nesse caso, não 1.
+  // Nos demais status (o fake sempre devolve a mesma resposta fixa, então
+  // uma rejeição continua rejeitada na segunda tentativa) permanece 1.
+  assert.equal(provider.calls.length, result.status === "REJECTED" ? 2 : 1);
   return result;
 }
 
