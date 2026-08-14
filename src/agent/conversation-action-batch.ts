@@ -55,6 +55,7 @@ export const FAILURE_MESSAGE_KEYS: ReadonlySet<string> = new Set([
   "PAYMENT_METHOD_REQUIRED",
   "INCOMPLETE_ORDER_DATA",
   "ORDER_CREATION_FAILED",
+  "STORE_CLOSED",
 ]);
 
 export function isFailureResult(result: AgentConversationResult): boolean {

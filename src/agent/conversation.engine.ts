@@ -407,6 +407,17 @@ function handleConfirmOrder(
     return noChange("INCOMPLETE_ORDER_DATA", "INCOMPLETE_ORDER_DATA", { missingFields });
   }
 
+  // Bloqueia a confirmação fora do horário de funcionamento — só quando
+  // operatingHours está cadastrado (known: true). Sem cadastro (known: false)
+  // ou sem a Tool disponível (getOperatingStatus é opcional em AgentTools,
+  // mesmo padrão de allowed-facts.ts e text-conversation.service.ts), o
+  // comportamento é fail-open, coerente com response-text-validator.ts:
+  // "não sei se está fechado" é tratado igual a "sabemos que está aberto".
+  const operatingStatus = tools.getOperatingStatus?.();
+  if (operatingStatus?.known && !operatingStatus.isOpenNow) {
+    return noChange("STORE_CLOSED", "STORE_CLOSED", { nextOpen: operatingStatus.nextOpen });
+  }
+
   // Revalida carrinho e produtos contra o catálogo atual — o mesmo critério
   // já usado em FINISH_CART — para não confirmar um item que ficou
   // indisponível ou com quantidade inválida enquanto a sessão aguardava.

@@ -16,6 +16,7 @@ import {
   friendlyOrderCreationFailedReason,
   friendlyMissingFieldLabel,
 } from "./messages.ts";
+import { formatTimeBR, WEEKDAY_LABELS_PT_BR, type Weekday } from "../lib/business-hours.ts";
 
 export type AgentChatMessage = {
   id: string;
@@ -165,6 +166,15 @@ function buildText(messageKey: string, context: AgentPresentationContext, data: 
       const missing = context.missingFields ?? (Array.isArray(d.missingFields) ? d.missingFields.map(String) : []);
       const labeled = missing.map(field => friendlyMissingFieldLabel(field));
       return interpolate(MESSAGE_CATALOG.INCOMPLETE_ORDER_DATA, { missingFields: formatList(labeled) });
+    }
+
+    case "STORE_CLOSED": {
+      const nextOpen = d.nextOpen as { weekday?: unknown; time?: unknown; sameDay?: unknown } | null | undefined;
+      if (!nextOpen || typeof nextOpen.time !== "string") return MESSAGE_CATALOG.STORE_CLOSED;
+      const nextOpenTime = formatTimeBR(nextOpen.time);
+      if (nextOpen.sameDay) return interpolate(MESSAGE_CATALOG.STORE_CLOSED_TODAY, { nextOpenTime });
+      const weekday = typeof nextOpen.weekday === "string" ? WEEKDAY_LABELS_PT_BR[nextOpen.weekday as Weekday] : undefined;
+      return interpolate(MESSAGE_CATALOG.STORE_CLOSED_OTHER_DAY, { weekday, nextOpenTime });
     }
 
     case "ORDER_CREATED":

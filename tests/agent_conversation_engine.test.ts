@@ -5,6 +5,7 @@ import { AgentConversationError, type AgentConversationAction } from "../src/age
 import type { AgentSession, AgentConversationStep } from "../src/agent/session.types.ts";
 import { createAgentTools, type AgentDomainStore, type AgentTools } from "../src/agent/tools.ts";
 import { OrderCreationError, type Order } from "../src/lib/orders.ts";
+import { INITIAL_OPERATING_HOURS } from "../src/lib/business-hours.ts";
 
 // --- fábricas de teste ---------------------------------------------------
 
@@ -32,9 +33,12 @@ function makeDomainStore(overrides: Partial<AgentDomainStore> = {}): AgentDomain
   };
 }
 
-function makeTools(overrides: Partial<AgentDomainStore> = {}): { tools: AgentTools; store: AgentDomainStore } {
+function makeTools(
+  overrides: Partial<AgentDomainStore> = {},
+  now?: () => Date,
+): { tools: AgentTools; store: AgentDomainStore } {
   const store = makeDomainStore(overrides);
-  return { tools: createAgentTools({ store }), store };
+  return { tools: createAgentTools({ store, now }), store };
 }
 
 // Spy fiel: envolve as Tools reais (sem duplicar sua lógica) só para contar
@@ -601,6 +605,46 @@ test("CONFIRM_ORDER revalida horário: rejeita se o horário salvo saiu da lista
   assert.equal(result.messageKey, "INVALID_PICKUP_TIME");
   assert.equal(result.currentStep, "AWAITING_CONFIRMATION");
   assert.equal(calls.createOrder, undefined);
+});
+
+// --- bloqueio de horário comercial ------------------------------------------
+
+// Terça-feira 07:05 em America/Fortaleza (UTC-3) — antes da abertura das 14h
+// do INITIAL_OPERATING_HOURS (seg-sex 14h-22h, sáb/dom fechado).
+const OUTSIDE_HOURS_NOW = () => new Date("2026-07-28T10:05:00.000Z");
+// Mesma terça-feira, 19:05 em America/Fortaleza — dentro do expediente.
+const WITHIN_HOURS_NOW = () => new Date("2026-07-28T22:05:00.000Z");
+
+test("CONFIRM_ORDER bloqueia fora do horário de funcionamento quando operatingHours está cadastrado", () => {
+  const { tools: realTools } = makeTools(
+    { business: { ...makeDomainStore().business, operatingHours: INITIAL_OPERATING_HOURS } },
+    OUTSIDE_HOURS_NOW,
+  );
+  const { tools, calls } = spyOn(realTools);
+  const result = run(readySession(), { type: "CONFIRM_ORDER" }, tools, OUTSIDE_HOURS_NOW);
+  assert.equal(result.messageKey, "STORE_CLOSED");
+  assert.equal(result.currentStep, "AWAITING_CONFIRMATION");
+  assert.equal(result.session.items.length, 1);
+  assert.equal(calls.createOrder, undefined);
+});
+
+test("CONFIRM_ORDER cria o pedido normalmente dentro do horário de funcionamento cadastrado", () => {
+  const { tools: realTools } = makeTools(
+    { business: { ...makeDomainStore().business, operatingHours: INITIAL_OPERATING_HOURS } },
+    WITHIN_HOURS_NOW,
+  );
+  const { tools } = spyOn(realTools);
+  const result = run(readySession(), { type: "CONFIRM_ORDER" }, tools, WITHIN_HOURS_NOW, () => "agent-order:test-0001");
+  assert.equal(result.messageKey, "ORDER_CREATED");
+  assert.equal(result.currentStep, "ORDER_CREATED");
+});
+
+test("CONFIRM_ORDER é fail-open quando operatingHours não está cadastrado (comportamento pré-existente)", () => {
+  const { tools: realTools } = makeTools();
+  const { tools } = spyOn(realTools);
+  const result = run(readySession(), { type: "CONFIRM_ORDER" }, tools, fixedNow(), () => "agent-order:test-0002");
+  assert.equal(result.messageKey, "ORDER_CREATED");
+  assert.equal(result.currentStep, "ORDER_CREATED");
 });
 
 // --- payload e idempotência -------------------------------------------------

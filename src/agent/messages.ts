@@ -121,6 +121,15 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   PAYMENT_METHOD_REQUIRED: "Antes de confirmar, escolha uma forma de pagamento.",
   ORDER_REVIEW: "Pedido\n\n{items}\n\nRetirada:\n{pickupTime}\n\nPagamento:\n{paymentMethod}\n\nNome:\n{customerName}",
   INCOMPLETE_ORDER_DATA: "Ainda faltam algumas informações para finalizar seu pedido:\n\n{missingFields}",
+  // Confirmação bloqueada fora do horário de funcionamento — mesmo estilo de
+  // BUSINESS_CLOSED_TODAY/BUSINESS_CLOSED_OTHER_DAY, adaptado ao contexto de
+  // pedido em andamento (carrinho preservado, cliente pode confirmar depois).
+  STORE_CLOSED:
+    "No momento estamos fechados e não é possível confirmar o pedido agora. Seu carrinho continua salvo, você pode confirmar assim que reabrirmos.",
+  STORE_CLOSED_TODAY:
+    "No momento estamos fechados e não é possível confirmar o pedido agora. Abrimos hoje às {nextOpenTime} — seu carrinho continua salvo.",
+  STORE_CLOSED_OTHER_DAY:
+    "No momento estamos fechados e não é possível confirmar o pedido agora. Nosso próximo horário de atendimento é {weekday}, às {nextOpenTime} — seu carrinho continua salvo.",
   ORDER_CREATED: "Pedido criado com sucesso!\n\nCódigo:\n{publicCode}",
   ORDER_ALREADY_CREATED: "Seu pedido já tinha sido criado.\n\nCódigo:\n{publicCode}",
   ORDER_CREATION_FAILED: "{reason}",
