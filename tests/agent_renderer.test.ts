@@ -194,6 +194,7 @@ test("MENU_READY completo usa os produtos do contexto", () => {
   );
   assert.match(messages[0].text, /Brownie Tradicional/);
   assert.match(messages[0].text, /R\$ 12,00/);
+  assert.deepEqual(messages[0].metadata?.products, [{ id: "p1", name: "Brownie Tradicional", basePrice: 12 }]);
 });
 
 test("ITEM_ADDED com nome do produto resolvido", () => {

@@ -26,6 +26,22 @@ export type AgentChatMessage = {
 
 type RawData = Record<string, unknown> | undefined;
 
+type MenuProductMetadata = {
+  id: string;
+  name: string;
+  basePrice: number;
+};
+
+function menuProductsMetadata(context: AgentPresentationContext, data: RawData): MenuProductMetadata[] {
+  const products = context.products ?? (Array.isArray(data?.products) ? data.products : []);
+  return products.flatMap(product => {
+    const candidate = product as { id?: unknown; name?: unknown; price?: unknown; basePrice?: unknown };
+    const basePrice = candidate.price ?? candidate.basePrice;
+    if (typeof candidate.id !== "string" || typeof candidate.name !== "string" || typeof basePrice !== "number") return [];
+    return [{ id: candidate.id, name: candidate.name, basePrice }];
+  });
+}
+
 function buildText(messageKey: string, context: AgentPresentationContext, data: RawData): string {
   const d = data ?? {};
 
@@ -176,13 +192,17 @@ function buildText(messageKey: string, context: AgentPresentationContext, data: 
 export function renderConversationPresentation(presentation: AgentConversationPresentation): AgentChatMessage[] {
   const { result, context } = presentation;
   if (result.messageKey === "MESSAGE_ALREADY_PROCESSED") return [];
+  const products = result.messageKey === "MENU_READY" ? menuProductsMetadata(context, result.data) : [];
 
   return [
     {
       id: randomUUID(),
       type: "text",
       text: buildText(result.messageKey, context, result.data),
-      metadata: { messageKey: result.messageKey },
+      metadata: {
+        messageKey: result.messageKey,
+        ...(products.length > 0 ? { products } : {}),
+      },
     },
   ];
 }

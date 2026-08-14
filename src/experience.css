@@ -80,6 +80,13 @@ html { overflow-x: hidden; }
 .agent-message .agent-chat-link:hover, .agent-message .agent-chat-link:focus-visible { background: #17643f; outline: 3px solid rgb(31 122 77 / .25); outline-offset: 2px; }
 .agent-copy-pix { margin: 7px 0 0; padding: 7px 10px; border: 1px solid var(--brand-pink); border-radius: 8px; color: var(--brand-brown-dark); background: #fff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
 .agent-copy-pix:hover, .agent-copy-pix:focus-visible { background: var(--brand-cream); outline: 3px solid rgb(230 111 162 / .2); outline-offset: 2px; }
+.agent-message .agent-menu { width: min(100%, 430px); padding: 11px 0 0 12px; border: 1px solid var(--line); border-radius: 13px 13px 13px 3px; overflow: hidden; color: var(--neutral-text); background: #fff; box-shadow: 0 2px 5px rgb(63 36 24 / .04); }
+.agent-message .agent-menu > p { margin: 0 12px 9px 0; color: var(--brand-brown-dark); font-size: 12px; font-weight: 800; }
+.agent-menu-carousel { display: flex; gap: 8px; overflow-x: auto; padding: 0 12px 12px 0; scroll-snap-type: x mandatory; scrollbar-color: var(--brand-pink) transparent; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.agent-menu-carousel:focus-visible { outline: 3px solid rgb(230 111 162 / .25); outline-offset: -3px; }
+.agent-menu-card { flex: 0 0 128px; min-height: 86px; padding: 12px; scroll-snap-align: start; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--brand-pink); border-radius: 11px; background: linear-gradient(145deg, #fff, var(--brand-cream)); box-shadow: 0 5px 13px rgb(63 36 24 / .07); }
+.agent-menu-card strong { color: var(--brand-brown-dark); font-family: 'DM Serif Display', serif; font-size: 16px; font-weight: 400; line-height: 1.08; }
+.agent-menu-card span { align-self: flex-start; padding: 0; border: 0; border-radius: 0; color: var(--brand-pink); background: transparent; box-shadow: none; font-size: 13px; font-weight: 800; }
 .agent-message.visitor { align-self: flex-end; justify-content: flex-end; }
 .agent-message.visitor span { border: 0; border-radius: 13px 13px 3px; color: #fff; background: var(--brand-brown); }
 .agent-message.typing span { display: flex; gap: 4px; padding: 13px; }
