@@ -280,7 +280,7 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
       text = interpolate(MESSAGE_CATALOG.BUSINESS_PAYMENT_OPTIONS, { options: formatOptions(data?.options) });
       break;
     case "BUSINESS_PIX_KEY":
-      text = interpolate(MESSAGE_CATALOG.BUSINESS_PIX_KEY, { pixKey: data?.pixKey });
+      text = interpolate(MESSAGE_CATALOG.BUSINESS_PIX_KEY, { pixKey: data?.pixKey, whatsappLink: data?.whatsappLink });
       break;
     case "BUSINESS_PAYMENT_PROOF":
       text = MESSAGE_CATALOG.BUSINESS_PAYMENT_PROOF;
@@ -318,7 +318,10 @@ export function renderTextConversationPolicyMessage(input: TextConversationPolic
       id: randomUUID(),
       type: "text",
       text,
-      metadata: { policyMessageKey: messageKey },
+      metadata: {
+        policyMessageKey: messageKey,
+        ...(messageKey === "BUSINESS_PIX_KEY" && typeof data?.pixKey === "string" ? { pixKey: data.pixKey } : {}),
+      },
     },
   ];
 }

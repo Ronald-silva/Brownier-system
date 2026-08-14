@@ -169,7 +169,7 @@ export const MESSAGE_CATALOG: Record<string, string> = {
   CART_TOTAL_EMPTY: "Ainda não tenho itens no seu pedido. Me diga o sabor e a quantidade que eu calculo na hora.",
   BUSINESS_RESPONSIBLE: "Quem responde pela Brownieria é o {name}.",
   BUSINESS_PAYMENT_OPTIONS: "No momento, as formas de pagamento disponíveis são:\n\n{options}",
-  BUSINESS_PIX_KEY: "A chave PIX da loja é:\n\n{pixKey}",
+  BUSINESS_PIX_KEY: "A chave PIX da loja é:\n\n{pixKey}\n\nDepois de pagar, envie o comprovante pelo WhatsApp oficial da Brownieria:\n{whatsappLink}",
   BUSINESS_PAYMENT_PROOF: "Depois do PIX, envie o comprovante pelo WhatsApp oficial da Brownieria. Se não tiver o contato, peça o link do WhatsApp aqui.",
   BUSINESS_WHATSAPP_LINK: "Você pode falar com a Brownieria por aqui:\n\n{whatsappLink}",
   BUSINESS_WHATSAPP_UNAVAILABLE: "O WhatsApp oficial ainda não está cadastrado. Posso seguir ajudando por aqui.",

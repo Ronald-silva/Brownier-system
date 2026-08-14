@@ -226,7 +226,7 @@ async function startServer() {
         messageId: crypto.randomUUID(),
         text,
       });
-      res.json({ messages: result.messages.map(message => ({ id: message.id, text: message.text })) });
+      res.json({ messages: result.messages.map(message => ({ id: message.id, text: message.text, ...(message.metadata ? { metadata: message.metadata } : {}) })) });
     } catch (error) {
       console.error("Falha no chat de demonstração", error);
       res.status(503).json({ error: "O assistente está indisponível por um instante. Tente novamente." });

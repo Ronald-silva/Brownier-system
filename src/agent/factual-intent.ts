@@ -80,7 +80,7 @@ export function resolveFactualIntent(input: {
   const asksWeekend = (words.has("fim") || words.has("finais")) && words.has("semana");
   const asksSchedule = (words.has("horario") && (words.has("funcionamento") || words.has("funciona"))) || asksWeekend;
   if (asksSchedule) return { kind: "OPERATING_HOURS" };
-  if (words.has("comprovante")) return { kind: "PAYMENT_PROOF" };
+  if (words.has("comprovante") || words.has("comprovente") || words.has("comprovantes")) return { kind: "PAYMENT_PROOF" };
   // No atendimento da Brownieria não há outro link operacional. Depois da
   // instrução de PIX, "manda o link" é a forma natural de pedir o WhatsApp.
   if (words.has("whatsapp") || words.has("zap") || (words.has("manda") && words.has("link"))) return { kind: "WHATSAPP_CONTACT" };

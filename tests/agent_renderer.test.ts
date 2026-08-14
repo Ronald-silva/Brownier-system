@@ -367,9 +367,12 @@ test("renderTextConversationPolicyMessage não inventa chave PIX ausente", () =>
   assert.match(messages[0].text, /ainda não está cadastrada/i);
 });
 
-test("renderTextConversationPolicyMessage mostra a chave PIX fornecida pela loja", () => {
-  const messages = renderTextConversationPolicyMessage({ messageKey: "BUSINESS_PIX_KEY", data: { pixKey: "38.011.069/0001-93" } });
+test("renderTextConversationPolicyMessage mostra a chave PIX, a orientação de comprovante e metadata copiável", () => {
+  const messages = renderTextConversationPolicyMessage({ messageKey: "BUSINESS_PIX_KEY", data: { pixKey: "38.011.069/0001-93", whatsappLink: "https://wa.me/558591457889" } });
   assert.match(messages[0].text, /38\.011\.069\/0001-93/);
+  assert.match(messages[0].text, /comprovante/i);
+  assert.match(messages[0].text, /https:\/\/wa\.me\/558591457889/);
+  assert.equal(messages[0].metadata?.pixKey, "38.011.069/0001-93");
 });
 
 test("renderTextConversationPolicyMessage explica retirada quando perguntam por entrega", () => {

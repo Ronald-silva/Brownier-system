@@ -721,7 +721,7 @@ export function createTextConversationService(
               ? { event: "BUSINESS_PAYMENT_OPTIONS", messageKey: "BUSINESS_PAYMENT_OPTIONS", data: { options: tools.getBusiness().paymentMethods } }
             : factualIntent.kind === "PIX_KEY"
               ? tools.getBusinessPixKey?.()
-                ? { event: "BUSINESS_PIX_KEY", messageKey: "BUSINESS_PIX_KEY", data: { pixKey: tools.getBusinessPixKey() } }
+                ? { event: "BUSINESS_PIX_KEY", messageKey: "BUSINESS_PIX_KEY", data: { pixKey: tools.getBusinessPixKey(), whatsappLink: buildWhatsappLink(tools.getBusiness().whatsapp) ?? "WhatsApp oficial não cadastrado." } }
                 : { event: "BUSINESS_PIX_KEY_UNAVAILABLE", messageKey: "BUSINESS_PIX_KEY_UNAVAILABLE" }
             : factualIntent.kind === "PAYMENT_PROOF"
               ? { event: "BUSINESS_PAYMENT_PROOF", messageKey: "BUSINESS_PAYMENT_PROOF" }

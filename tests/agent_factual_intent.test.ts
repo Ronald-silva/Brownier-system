@@ -96,6 +96,7 @@ test("pergunta sobre amanhã recebe intenção de disponibilidade específica", 
 
 test("pergunta sobre comprovante de PIX não depende do modelo", () => {
   assert.equal(resolveFactualIntent({ text: "onde mando o comprovante?" })?.kind, "PAYMENT_PROOF");
+  assert.equal(resolveFactualIntent({ text: "onde mando o comprovente?" })?.kind, "PAYMENT_PROOF");
 });
 
 for (const text of ["qual o WhatsApp?", "me manda o link do zap", "manda o link"]) {
