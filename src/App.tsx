@@ -115,6 +115,7 @@ function AgentDemo({ onBack }: { onBack: () => void }) {
   const [copiedPixKey, setCopiedPixKey] = useState<string | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLFormElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const initializedSessionRef = useRef("");
   const copiedPixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,10 +147,41 @@ function AgentDemo({ onBack }: { onBack: () => void }) {
     if (!viewport || !shouldStickToBottomRef.current) return;
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: messages.length <= 1 ? "auto" : "smooth" });
   }, [messages, loading]);
+  // O Safari mantém o layout viewport com a altura original quando o teclado
+  // aparece. Nesse caso, o teclado pode cobrir o composer mesmo com unidades
+  // dinâmicas no CSS. Observamos a VisualViewport e deslocamos a página só
+  // enquanto o campo do chat estiver em foco.
   useEffect(() => {
-    if (loading) return;
-    requestAnimationFrame(() => composerInputRef.current?.focus({ preventScroll: true }));
-  }, [loading, sessionId]);
+    const input = composerInputRef.current;
+    if (!input) return;
+    let frame = 0;
+    const keepComposerVisible = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (document.activeElement !== input) return;
+        const visualViewport = window.visualViewport;
+        if (!visualViewport) {
+          input.scrollIntoView({ block: "nearest" });
+          return;
+        }
+        const composerBottom = composerRef.current?.getBoundingClientRect().bottom;
+        const visibleBottom = visualViewport.height - 12;
+        if (composerBottom && composerBottom > visibleBottom) {
+          window.scrollBy({ top: composerBottom - visibleBottom, behavior: "auto" });
+        }
+      });
+    };
+    const visualViewport = window.visualViewport;
+    input.addEventListener("focus", keepComposerVisible);
+    visualViewport?.addEventListener("resize", keepComposerVisible);
+    visualViewport?.addEventListener("scroll", keepComposerVisible);
+    return () => {
+      cancelAnimationFrame(frame);
+      input.removeEventListener("focus", keepComposerVisible);
+      visualViewport?.removeEventListener("resize", keepComposerVisible);
+      visualViewport?.removeEventListener("scroll", keepComposerVisible);
+    };
+  }, []);
   const handleMessagesScroll = () => {
     const viewport = messagesViewportRef.current;
     if (!viewport) return;
@@ -161,7 +193,7 @@ function AgentDemo({ onBack }: { onBack: () => void }) {
     initializedSessionRef.current = sessionId;
     void send("Olá");
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <section className="section page agent-demo-page"><Back onClick={onBack} /><div className="agent-demo-heading"><div><p className="eyebrow">DEMONSTRAÇÃO AO VIVO</p><h1>A assistente que atende enquanto você produz.</h1><p className="subtle">Este chat usa o mesmo cérebro do atendimento. É uma simulação segura: nenhum pedido é enviado para a produção.</p></div><button className="secondary agent-reset" onClick={restart} disabled={loading}><RotateCcw size={16} aria-hidden="true" /> Recomeçar</button></div><div className="agent-chat" aria-label="Conversa com a assistente"><div className="agent-chat-top"><span className="agent-status"><i /> Assistente Brownieria</span><small>online para demonstração</small></div><div className="agent-messages" ref={messagesViewportRef} onScroll={handleMessagesScroll} aria-live="polite">{messages.map(message => <div className={`agent-message ${message.author}`} key={message.id}><div>{message.author === "agent" && message.metadata?.products?.length ? <AgentMenuCarousel products={message.metadata.products} /> : <span>{renderChatText(message.text)}</span>}{message.author === "agent" && message.metadata?.pixKey && <button className="agent-copy-pix" type="button" onClick={() => void copyPixKey(message.metadata!.pixKey!)}>{copiedPixKey === message.metadata.pixKey ? "Copiado!" : "Copiar chave PIX"}</button>}</div></div>)}{loading && <div className="agent-message agent typing" aria-label="Assistente digitando"><span><i /><i /><i /></span></div>}</div><form className="agent-composer" onSubmit={event => { event.preventDefault(); void send(draft); }} aria-busy={loading}><input ref={composerInputRef} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Escreva sua mensagem…" maxLength={1500} aria-label="Sua mensagem" autoComplete="off" autoFocus /><button className="primary" disabled={loading || !draft.trim()} aria-label="Enviar mensagem"><Send size={18} aria-hidden="true" /></button></form></div>{error && <p className="error">{error}</p>}<div className="agent-prompts"><span>Experimente:</span>{["Quais sabores vocês têm?", "Quero 2 brownies de brigadeiro", "Como posso pagar?"].map(prompt => <button key={prompt} className="choice" onClick={() => void send(prompt)} disabled={loading}>{prompt}</button>)}</div></section>;
+  return <section className="section page agent-demo-page"><Back onClick={onBack} /><div className="agent-demo-heading"><div><p className="eyebrow">DEMONSTRAÇÃO AO VIVO</p><h1>A assistente que atende enquanto você produz.</h1><p className="subtle">Este chat usa o mesmo cérebro do atendimento. É uma simulação segura: nenhum pedido é enviado para a produção.</p></div><button className="secondary agent-reset" onClick={restart} disabled={loading}><RotateCcw size={16} aria-hidden="true" /> Recomeçar</button></div><div className="agent-chat" aria-label="Conversa com a assistente"><div className="agent-chat-top"><span className="agent-status"><i /> Assistente Brownieria</span><small>online para demonstração</small></div><div className="agent-messages" ref={messagesViewportRef} onScroll={handleMessagesScroll} aria-live="polite">{messages.map(message => <div className={`agent-message ${message.author}`} key={message.id}><div>{message.author === "agent" && message.metadata?.products?.length ? <AgentMenuCarousel products={message.metadata.products} /> : <span>{renderChatText(message.text)}</span>}{message.author === "agent" && message.metadata?.pixKey && <button className="agent-copy-pix" type="button" onClick={() => void copyPixKey(message.metadata!.pixKey!)}>{copiedPixKey === message.metadata.pixKey ? "Copiado!" : "Copiar chave PIX"}</button>}</div></div>)}{loading && <div className="agent-message agent typing" aria-label="Assistente digitando"><span><i /><i /><i /></span></div>}</div><form ref={composerRef} className="agent-composer" onSubmit={event => { event.preventDefault(); void send(draft); }} aria-busy={loading}><input ref={composerInputRef} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Escreva sua mensagem…" maxLength={1500} aria-label="Sua mensagem" autoComplete="off" /><button className="primary" disabled={loading || !draft.trim()} aria-label="Enviar mensagem"><Send size={18} aria-hidden="true" /></button></form></div>{error && <p className="error">{error}</p>}<div className="agent-prompts"><span>Experimente:</span>{["Quais sabores vocês têm?", "Quero 2 brownies de brigadeiro", "Como posso pagar?"].map(prompt => <button key={prompt} className="choice" onClick={() => void send(prompt)} disabled={loading}>{prompt}</button>)}</div></section>;
 }
 function Menu({ products, cart, onBack, onProduct, onAdd }: { products: Product[]; cart: CartLine[]; onBack: () => void; onProduct: (p: Product) => void; onAdd: (p: Product) => void }) { const ordered = [...products].sort((a,b) => Number(b.slug === "brigadeiro") - Number(a.slug === "brigadeiro") || Number(b.isFeatured) - Number(a.isFeatured) || Number(b.isAvailable) - Number(a.isAvailable) || a.displayOrder - b.displayOrder); const quantityOf = (id: string) => cart.find(l => l.product.id === id)?.quantity ?? 0; return <section className="section page menu-page"><Back onClick={onBack} /><p className="eyebrow">CARDÁPIO ATUALIZADO</p><h1>Escolha seu momento doce.</h1><p className="subtle">Produzidos em pequenos lotes. Sabores disponíveis aparecem primeiro.</p><h2 className="sr-only">Sabores disponíveis</h2><div className="product-grid menu-grid">{ordered.map(p => <ProductCard key={p.id} product={p} isDay={p.slug === "brigadeiro"} quantity={quantityOf(p.id)} onClick={() => onProduct(p)} onAdd={() => onAdd(p)} />)}</div></section> }
 function ProductCard({ product, isDay = false, quantity = 0, onClick, onAdd }: { key?: string; product: Product; isDay?: boolean; quantity?: number; onClick: () => void; onAdd?: () => void }) {
