@@ -10,81 +10,77 @@ import { INITIAL_OPERATING_HOURS, type StructuredWeeklyHours } from "../src/lib/
 // aritmética manual de fuso.
 const at = (iso: string) => new Date(iso);
 
-test("dia útil aberto: segunda-feira 10:00 está aberta, fecha às 18:00", () => {
-  const status = getOperatingStatus({ now: at("2026-08-03T10:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
+test("dia útil aberto: segunda-feira 15:00 está aberta, fecha às 22:00", () => {
+  const status = getOperatingStatus({ now: at("2026-08-03T15:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, true);
   assert.equal(status.weekday, "MON");
-  assert.equal(status.currentClose, "18:00");
+  assert.equal(status.currentClose, "22:00");
   assert.equal(status.closedReason, null);
 });
 
-test("1h da madrugada: fechado, com próxima abertura hoje às 08:00", () => {
+test("1h da madrugada: fechado, com próxima abertura hoje às 14:00", () => {
   const status = getOperatingStatus({ now: at("2026-08-04T01:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, false);
   assert.equal(status.weekday, "TUE");
   assert.equal(status.closedReason, "OUTSIDE_HOURS");
-  assert.deepEqual(status.nextOpen, { weekday: "TUE", time: "08:00", sameDay: true });
+  assert.deepEqual(status.nextOpen, { weekday: "TUE", time: "14:00", sameDay: true });
 });
 
-test("antes da abertura (07:59) está fechado, abre hoje às 08:00", () => {
-  const status = getOperatingStatus({ now: at("2026-08-03T07:59:00-03:00"), hours: INITIAL_OPERATING_HOURS });
+test("antes da abertura (13:59) está fechado, abre hoje às 14:00", () => {
+  const status = getOperatingStatus({ now: at("2026-08-03T13:59:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, false);
-  assert.deepEqual(status.nextOpen, { weekday: "MON", time: "08:00", sameDay: true });
+  assert.deepEqual(status.nextOpen, { weekday: "MON", time: "14:00", sameDay: true });
 });
 
-test("exatamente no minuto de abertura (08:00) já está aberto", () => {
-  const status = getOperatingStatus({ now: at("2026-08-03T08:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
+test("exatamente no minuto de abertura (14:00) já está aberto", () => {
+  const status = getOperatingStatus({ now: at("2026-08-03T14:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, true);
-  assert.equal(status.currentClose, "18:00");
+  assert.equal(status.currentClose, "22:00");
 });
 
-test("exatamente no minuto de encerramento (18:00) já está fechado", () => {
-  const status = getOperatingStatus({ now: at("2026-08-03T18:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
+test("exatamente no minuto de encerramento (22:00) já está fechado", () => {
+  const status = getOperatingStatus({ now: at("2026-08-03T22:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, false);
   assert.equal(status.closedReason, "OUTSIDE_HOURS");
-  // Segunda não tem mais intervalos hoje; próxima abertura é terça 08:00.
-  assert.deepEqual(status.nextOpen, { weekday: "TUE", time: "08:00", sameDay: false });
+  // Segunda não tem mais intervalos hoje; próxima abertura é terça 14:00.
+  assert.deepEqual(status.nextOpen, { weekday: "TUE", time: "14:00", sameDay: false });
 });
 
-test("depois do encerramento (18:30) está fechado, próxima abertura é outro dia", () => {
-  const status = getOperatingStatus({ now: at("2026-08-03T18:30:00-03:00"), hours: INITIAL_OPERATING_HOURS });
+test("depois do encerramento (22:30) está fechado, próxima abertura é outro dia", () => {
+  const status = getOperatingStatus({ now: at("2026-08-03T22:30:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, false);
-  assert.deepEqual(status.nextOpen, { weekday: "TUE", time: "08:00", sameDay: false });
+  assert.deepEqual(status.nextOpen, { weekday: "TUE", time: "14:00", sameDay: false });
 });
 
-test("sábado: aberto 08:00-12:00 conforme horário inicial", () => {
-  const open = getOperatingStatus({ now: at("2026-08-01T09:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
-  assert.equal(open.known, true);
-  if (open.known) { assert.equal(open.isOpenNow, true); assert.equal(open.currentClose, "12:00"); }
-
-  // Sábado à tarde, fechado — próxima abertura pula domingo (fechado) e cai em segunda.
-  const afternoon = getOperatingStatus({ now: at("2026-08-01T13:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
-  assert.equal(afternoon.known, true);
-  if (!afternoon.known) return;
-  assert.equal(afternoon.isOpenNow, false);
-  assert.deepEqual(afternoon.nextOpen, { weekday: "MON", time: "08:00", sameDay: false });
+test("sábado: fechado o dia inteiro, próxima abertura segunda às 14:00", () => {
+  const status = getOperatingStatus({ now: at("2026-08-01T09:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
+  assert.equal(status.known, true);
+  if (!status.known) return;
+  assert.equal(status.isOpenNow, false);
+  assert.equal(status.closedReason, "DAY_CLOSED");
+  assert.deepEqual(status.nextOpen, { weekday: "MON", time: "14:00", sameDay: false });
 });
 
-test("domingo: fechado o dia inteiro (DAY_CLOSED), próxima abertura segunda 08:00", () => {
+test("domingo: fechado o dia inteiro (DAY_CLOSED), próxima abertura segunda 14:00", () => {
   const status = getOperatingStatus({ now: at("2026-08-02T10:00:00-03:00"), hours: INITIAL_OPERATING_HOURS });
   assert.equal(status.known, true);
   if (!status.known) return;
   assert.equal(status.isOpenNow, false);
   assert.equal(status.weekday, "SUN");
   assert.equal(status.closedReason, "DAY_CLOSED");
-  assert.deepEqual(status.nextOpen, { weekday: "MON", time: "08:00", sameDay: false });
+  assert.deepEqual(status.nextOpen, { weekday: "MON", time: "14:00", sameDay: false });
 });
 
 test("dois intervalos no mesmo dia: almoço fechado entre os dois", () => {
@@ -144,20 +140,20 @@ test("dia anterior: intervalo de segunda que cruza a meia-noite cobre a madrugad
 });
 
 test("timezone correto mesmo com o relógio do servidor calculado como instante UTC", () => {
-  // 2026-08-03T13:00:00Z é exatamente 2026-08-03T10:00:00-03:00 em Fortaleza
+  // 2026-08-03T18:00:00Z é exatamente 2026-08-03T15:00:00-03:00 em Fortaleza
   // — o mesmo instante absoluto de "dia útil aberto" acima, só que construído
   // a partir de um sufixo "Z" (o formato que Date.now()/JSON usam), nunca de
   // horário local do processo. O cálculo não pode depender de TZ do host.
   const original = process.env.TZ;
   process.env.TZ = "UTC";
   try {
-    const status = getOperatingStatus({ now: new Date("2026-08-03T13:00:00Z"), hours: INITIAL_OPERATING_HOURS });
+    const status = getOperatingStatus({ now: new Date("2026-08-03T18:00:00Z"), hours: INITIAL_OPERATING_HOURS });
     assert.equal(status.known, true);
     if (!status.known) return;
     assert.equal(status.weekday, "MON");
     assert.equal(status.isOpenNow, true);
-    assert.equal(status.currentClose, "18:00");
-    assert.equal(status.nowLocal, "2026-08-03T10:00:00-03:00");
+    assert.equal(status.currentClose, "22:00");
+    assert.equal(status.nowLocal, "2026-08-03T15:00:00-03:00");
     assert.equal(status.timezone, "America/Fortaleza");
   } finally {
     if (original === undefined) delete process.env.TZ; else process.env.TZ = original;

@@ -8,10 +8,10 @@ import {
   type StructuredWeeklyHours,
 } from "../src/lib/business-hours.ts";
 
-test("horário inicial: seg-sex 08:00-18:00, sáb 08:00-12:00, dom fechado", () => {
-  assert.deepEqual(INITIAL_OPERATING_HOURS.MON, [{ open: "08:00", close: "18:00" }]);
-  assert.deepEqual(INITIAL_OPERATING_HOURS.FRI, [{ open: "08:00", close: "18:00" }]);
-  assert.deepEqual(INITIAL_OPERATING_HOURS.SAT, [{ open: "08:00", close: "12:00" }]);
+test("horário inicial: seg-sex 14:00-22:00, sábado e domingo fechados", () => {
+  assert.deepEqual(INITIAL_OPERATING_HOURS.MON, [{ open: "14:00", close: "22:00" }]);
+  assert.deepEqual(INITIAL_OPERATING_HOURS.FRI, [{ open: "14:00", close: "22:00" }]);
+  assert.deepEqual(INITIAL_OPERATING_HOURS.SAT, []);
   assert.deepEqual(INITIAL_OPERATING_HOURS.SUN, []);
   assert.deepEqual(validateStructuredWeeklyHours(INITIAL_OPERATING_HOURS), []);
 });

@@ -105,8 +105,8 @@ test("status accepts only MATCHED, NOT_UNDERSTOOD and AMBIGUOUS", () => {
   assert.deepEqual([...statusProp.enum!].sort(), ["AMBIGUOUS", "MATCHED", "NOT_UNDERSTOOD"]);
 });
 
-test("actions has maxItems 5", () => {
-  assert.equal(actionsSchema().maxItems, 5);
+test("actions has maxItems 12", () => {
+  assert.equal(actionsSchema().maxItems, 12);
 });
 
 test("actions items use oneOf", () => {

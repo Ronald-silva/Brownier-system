@@ -254,16 +254,16 @@ test("[integração] tools.createOrder e orders.ts oficial calculam o mesmo tota
 
 test("getOperatingStatus delega para operating-status.ts usando o relógio injetado e o horário cadastrado", () => {
   const store = makeStore({ business: { ...makeStore().business, operatingHours: INITIAL_OPERATING_HOURS } });
-  const tools = createAgentTools({ store, now: () => new Date("2026-08-03T10:00:00-03:00") }); // segunda, 10h
+  const tools = createAgentTools({ store, now: () => new Date("2026-08-03T15:00:00-03:00") }); // segunda, 15h
   const status = tools.getOperatingStatus!();
   assert.equal(status.known, true);
-  if (status.known) { assert.equal(status.isOpenNow, true); assert.equal(status.currentClose, "18:00"); }
+  if (status.known) { assert.equal(status.isOpenNow, true); assert.equal(status.currentClose, "22:00"); }
 });
 
 test("getTomorrowPickupSchedule retorna o horário real do próximo dia no fuso da loja", () => {
   const store = makeStore({ business: { ...makeStore().business, operatingHours: INITIAL_OPERATING_HOURS } });
   const tools = createAgentTools({ store, now: () => new Date("2026-08-03T10:00:00-03:00") }); // segunda; amanhã é terça
-  assert.deepEqual(tools.getTomorrowPickupSchedule!(), { weekday: "terça-feira", hours: "8h às 18h", open: true });
+  assert.deepEqual(tools.getTomorrowPickupSchedule!(), { weekday: "terça-feira", hours: "14h às 22h", open: true });
 });
 
 test("getOperatingStatus nunca lança quando operatingHours está ausente ou malformado — vira known:false", () => {

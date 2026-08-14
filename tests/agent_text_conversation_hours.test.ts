@@ -34,25 +34,25 @@ function makeStack(operatingHours: StructuredWeeklyHours | undefined, now: () =>
   return { textService };
 }
 
-test('aberto agora: "Sim, estamos abertos agora. Você pode retirar até às 18h."', async () => {
-  const { textService } = makeStack(INITIAL_OPERATING_HOURS, () => new Date("2026-08-03T10:00:00-03:00"));
+test('aberto agora: "Sim, estamos abertos agora. Você pode retirar até às 22h."', async () => {
+  const { textService } = makeStack(INITIAL_OPERATING_HOURS, () => new Date("2026-08-03T15:00:00-03:00"));
   const result = await textService.processText({ channel: CH, contactId: "hours-open", text: "Posso retirar pedido agora?" });
   assert.equal(result.policyResult?.messageKey, "BUSINESS_OPEN_NOW");
-  assert.equal(result.messages[0]?.text, "Sim, estamos abertos agora. Você pode retirar até às 18h.");
+  assert.equal(result.messages[0]?.text, "Sim, estamos abertos agora. Você pode retirar até às 22h.");
 });
 
-test('fechado, abre mais tarde hoje: "No momento estamos fechados. Abrimos hoje às 8h."', async () => {
+test('fechado, abre mais tarde hoje: "No momento estamos fechados. Abrimos hoje às 14h."', async () => {
   const { textService } = makeStack(INITIAL_OPERATING_HOURS, () => new Date("2026-08-04T01:00:00-03:00"));
   const result = await textService.processText({ channel: CH, contactId: "hours-closed-today", text: "Vocês estão abertos?" });
   assert.equal(result.policyResult?.messageKey, "BUSINESS_CLOSED_TODAY");
-  assert.equal(result.messages[0]?.text, "No momento estamos fechados. Abrimos hoje às 8h.");
+  assert.equal(result.messages[0]?.text, "No momento estamos fechados. Abrimos hoje às 14h.");
 });
 
-test('fechado, próxima abertura em outro dia: "...Nosso próximo horário de atendimento é segunda-feira, às 8h."', async () => {
+test('fechado, próxima abertura em outro dia: "...Nosso próximo horário de atendimento é segunda-feira, às 14h."', async () => {
   const { textService } = makeStack(INITIAL_OPERATING_HOURS, () => new Date("2026-08-02T10:00:00-03:00")); // domingo
   const result = await textService.processText({ channel: CH, contactId: "hours-closed-other-day", text: "Que horas vocês abrem?" });
   assert.equal(result.policyResult?.messageKey, "BUSINESS_CLOSED_OTHER_DAY");
-  assert.equal(result.messages[0]?.text, "No momento estamos fechados. Nosso próximo horário de atendimento é segunda-feira, às 8h.");
+  assert.equal(result.messages[0]?.text, "No momento estamos fechados. Nosso próximo horário de atendimento é segunda-feira, às 14h.");
 });
 
 test('sem configuração: "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar."', async () => {
