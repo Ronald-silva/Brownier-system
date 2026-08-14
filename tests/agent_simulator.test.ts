@@ -124,6 +124,8 @@ type SimulatorHandle = {
   close(): Promise<number | null>;
 };
 
+const SIMULATOR_OUTPUT_TIMEOUT_MS = 5_000;
+
 function startSimulator(storePath: string, extraEnv: Record<string, string> = {}): SimulatorHandle {
   const child = spawn("node", ["--experimental-strip-types", "src/agent/simulator.ts"], {
     cwd: path.resolve(import.meta.dirname, ".."),
@@ -131,8 +133,30 @@ function startSimulator(storePath: string, extraEnv: Record<string, string> = {}
     stdio: ["pipe", "pipe", "pipe"],
   });
   let buffer = "";
+  let stderr = "";
+  let terminalError: Error | undefined;
   const pendingLines: string[] = [];
-  const waiters: Array<(line: string) => void> = [];
+  const waiters: Array<{
+    resolve: (line: string) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+
+  function rejectWaitingOutputs(error: Error): void {
+    terminalError = error;
+    while (waiters.length > 0) {
+      const waiter = waiters.shift()!;
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+  }
+
+  function processEndedError(exitCode: number | null, signal: NodeJS.Signals | null): Error {
+    return new Error(
+      `Simulator encerrou antes de produzir a saída esperada (exitCode=${String(exitCode)}, signal=${String(signal)}). stderr: ${stderr || "(vazio)"}`,
+    );
+  }
+
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", chunk => {
     buffer += chunk;
@@ -142,20 +166,47 @@ function startSimulator(storePath: string, extraEnv: Record<string, string> = {}
       buffer = buffer.slice(idx + 1);
       if (!line.trim()) continue;
       const waiter = waiters.shift();
-      if (waiter) waiter(line);
+      if (waiter) {
+        clearTimeout(waiter.timer);
+        waiter.resolve(line);
+      }
       else pendingLines.push(line);
     }
+  });
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", chunk => {
+    stderr += chunk;
+  });
+  child.on("error", error => {
+    rejectWaitingOutputs(error);
+  });
+  child.on("exit", (exitCode, signal) => {
+    rejectWaitingOutputs(processEndedError(exitCode, signal));
+  });
+  child.on("close", (exitCode, signal) => {
+    if (!terminalError) rejectWaitingOutputs(processEndedError(exitCode, signal));
   });
   return {
     sendLine(line: unknown) {
       child.stdin.write(JSON.stringify(line) + "\n");
     },
     nextOutput(): Promise<unknown> {
-      return new Promise(resolve => {
+      return new Promise((resolve, reject) => {
         const deliver = (line: string) => resolve(JSON.parse(line));
         const pending = pendingLines.shift();
         if (pending) deliver(pending);
-        else waiters.push(deliver);
+        else if (terminalError) reject(terminalError);
+        else {
+          const timer = setTimeout(() => {
+            const index = waiters.findIndex(waiter => waiter.timer === timer);
+            if (index >= 0) waiters.splice(index, 1);
+            const error = new Error(`Timeout de ${SIMULATOR_OUTPUT_TIMEOUT_MS}ms aguardando saída do simulador. stderr: ${stderr || "(vazio)"}`);
+            terminalError = error;
+            child.stdin.end();
+            reject(error);
+          }, SIMULATOR_OUTPUT_TIMEOUT_MS);
+          waiters.push({ resolve: deliver, reject, timer });
+        }
       });
     },
     close(): Promise<number | null> {
