@@ -20,6 +20,16 @@ function tokens(text: string): Set<string> {
   return new Set(normalizeInterpreterText(text).split(" ").filter(Boolean));
 }
 
+function mentionsPickupTomorrowWords(words: Set<string>): boolean {
+  return words.has("amanha");
+}
+
+// Reutilizável por políticas compostas que preservam a intenção factual
+// primária, mas também precisam responder à pergunta explícita sobre amanhã.
+export function mentionsPickupTomorrow(text: string): boolean {
+  return mentionsPickupTomorrowWords(tokens(text));
+}
+
 // Palavras que por si só perguntam sobre o estado aberto/fechado, mesmo sem
 // menção a "retirada"/"agora" (ex.: "vocês estão abertos?", "que horas
 // abre?"). Combinadas com pickupContext+asksNow, cobrem as quatro perguntas
@@ -87,7 +97,7 @@ export function resolveFactualIntent(input: {
   // "amanhã dá certo?" é uma pergunta de horário/disponibilidade, mesmo
   // sem repetir a palavra retirada. A agenda completa é preferível a uma
   // resposta vaga ou a uma previsão inventada pelo modelo.
-  if (words.has("amanha")) return { kind: "PICKUP_TOMORROW" };
+  if (mentionsPickupTomorrowWords(words)) return { kind: "PICKUP_TOMORROW" };
   const asksOpenState = [...OPEN_STATE_WORDS].some(word => words.has(word));
   if ((pickupContext && asksNow) || asksOpenState) {
     return { kind: "PICKUP_AVAILABILITY", status: input.operatingStatus ?? { known: false } };

@@ -55,6 +55,28 @@ test('fechado, próxima abertura em outro dia: "...Nosso próximo horário de at
   assert.equal(result.messages[0]?.text, "No momento estamos fechados. Nosso próximo horário de atendimento é segunda-feira, às 14h.");
 });
 
+test("pergunta composta de entrega e retirada amanhã responde os dois pontos", async () => {
+  const { textService } = makeStack(INITIAL_OPERATING_HOURS, () => new Date("2026-08-07T15:00:00-03:00")); // sexta-feira; amanhã é sábado
+  const result = await textService.processText({
+    channel: CH,
+    contactId: "delivery-and-tomorrow",
+    text: "ok. que horas eu poso passa pra pegar amanha? ou vcs fazem entregas?",
+  });
+  assert.equal(result.policyResult?.messageKey, "BUSINESS_DELIVERY_UNAVAILABLE");
+  assert.equal(result.messages.length, 2);
+  assert.equal(result.messages[0]?.text, "No momento, os pedidos são para retirada no local. Você pode buscar pessoalmente ou enviar um Uber Moto por sua conta.");
+  assert.equal(result.messages[1]?.text, "Amanhã, sábado, não teremos retirada.");
+});
+
+test("pergunta só sobre entrega continua respondendo uma única mensagem", async () => {
+  const { textService } = makeStack(INITIAL_OPERATING_HOURS, () => new Date("2026-08-07T15:00:00-03:00"));
+  const result = await textService.processText({ channel: CH, contactId: "delivery-only", text: "vocês fazem entregas?" });
+  assert.equal(result.policyResult?.messageKey, "BUSINESS_DELIVERY_UNAVAILABLE");
+  assert.deepEqual(result.messages.map(message => message.text), [
+    "No momento, os pedidos são para retirada no local. Você pode buscar pessoalmente ou enviar um Uber Moto por sua conta.",
+  ]);
+});
+
 test('sem configuração: "Ainda não tenho a confirmação do horário de retirada. Posso chamar um atendente para confirmar."', async () => {
   const { textService } = makeStack(undefined, () => new Date("2026-08-03T10:00:00-03:00"));
   const result = await textService.processText({ channel: CH, contactId: "hours-unconfigured", text: "Posso buscar hoje?" });

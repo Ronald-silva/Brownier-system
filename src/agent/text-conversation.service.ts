@@ -45,7 +45,7 @@ import type {
   InterpretLlmMessageInput,
 } from "./llm-interpreter.types.ts";
 import { executeConversationActionBatch, isFailureResult } from "./conversation-action-batch.ts";
-import { resolveFactualIntent } from "./factual-intent.ts";
+import { mentionsPickupTomorrow, resolveFactualIntent } from "./factual-intent.ts";
 import { buildWhatsappLink } from "../lib/whatsapp.ts";
 import type { OperatingStatus } from "./operating-status.ts";
 import { WEEKDAY_LABELS_PT_BR, formatTimeBR } from "../lib/business-hours.ts";
@@ -456,6 +456,14 @@ function pickupAvailabilityPolicyResult(status: OperatingStatus): TextConversati
   };
 }
 
+function pickupTomorrowPolicyResult(tools: AgentTools): TextConversationPolicyResult {
+  const schedule = tools.getTomorrowPickupSchedule?.();
+  if (!schedule) return { event: "BUSINESS_PICKUP_HOURS_UNAVAILABLE", messageKey: "BUSINESS_PICKUP_HOURS_UNAVAILABLE" };
+  return schedule.open
+    ? { event: "BUSINESS_TOMORROW_OPEN", messageKey: "BUSINESS_TOMORROW_OPEN", data: schedule }
+    : { event: "BUSINESS_TOMORROW_CLOSED", messageKey: "BUSINESS_TOMORROW_CLOSED", data: schedule };
+}
+
 function llmRecoveryKind(session: AgentSession): "START" | "ORDER" {
   return session.step === "START" || session.step === "BROWSING_MENU" ? "START" : "ORDER";
 }
@@ -707,6 +715,7 @@ export function createTextConversationService(
       if (factualIntent?.kind === "ADDRESS" || factualIntent?.kind === "PICKUP_AVAILABILITY" || factualIntent?.kind === "PICKUP_TOMORROW" || factualIntent?.kind === "CART_TOTAL" || factualIntent?.kind === "OUT_OF_SCOPE_PRODUCT" || factualIntent?.kind === "RESPONSIBLE" || factualIntent?.kind === "PAYMENT_OPTIONS" || factualIntent?.kind === "PIX_KEY" || factualIntent?.kind === "PAYMENT_PROOF" || factualIntent?.kind === "WHATSAPP_CONTACT" || factualIntent?.kind === "OPERATING_HOURS" || factualIntent?.kind === "DELIVERY") {
         if (messageId) sessionStore.markMessageProcessed(sessionKey, messageId);
         const sessionAfter = structuredClone(sessionStore.get(sessionKey)!);
+        const deliveryAlsoMentionsPickupTomorrow = factualIntent.kind === "DELIVERY" && mentionsPickupTomorrow(text);
         const policyResult: TextConversationPolicyResult = factualIntent.kind === "ADDRESS"
           ? factualIntent.address
             ? { event: "BUSINESS_ADDRESS", messageKey: "BUSINESS_ADDRESS", data: { address: factualIntent.address } }
@@ -732,13 +741,7 @@ export function createTextConversationService(
             : factualIntent.kind === "OPERATING_HOURS"
               ? { event: "BUSINESS_OPERATING_HOURS", messageKey: "BUSINESS_OPERATING_HOURS", data: { hours: tools.getBusinessHours?.() || "Horários não cadastrados." } }
             : factualIntent.kind === "PICKUP_TOMORROW"
-              ? (() => {
-                  const schedule = tools.getTomorrowPickupSchedule?.();
-                  if (!schedule) return { event: "BUSINESS_PICKUP_HOURS_UNAVAILABLE", messageKey: "BUSINESS_PICKUP_HOURS_UNAVAILABLE" };
-                  return schedule.open
-                    ? { event: "BUSINESS_TOMORROW_OPEN", messageKey: "BUSINESS_TOMORROW_OPEN", data: schedule }
-                    : { event: "BUSINESS_TOMORROW_CLOSED", messageKey: "BUSINESS_TOMORROW_CLOSED", data: schedule };
-                })()
+              ? pickupTomorrowPolicyResult(tools)
             : factualIntent.kind === "DELIVERY"
               ? { event: "BUSINESS_DELIVERY_UNAVAILABLE", messageKey: "BUSINESS_DELIVERY_UNAVAILABLE" }
             : (() => {
@@ -754,7 +757,12 @@ export function createTextConversationService(
           sessionBefore,
           sessionAfter,
           policyResult,
-          messages: renderTextConversationPolicyMessage(policyResult),
+          messages: deliveryAlsoMentionsPickupTomorrow
+            ? [
+                ...renderTextConversationPolicyMessage(policyResult),
+                ...renderTextConversationPolicyMessage(pickupTomorrowPolicyResult(tools)),
+              ]
+            : renderTextConversationPolicyMessage(policyResult),
           policy: {
             misunderstandingCountBefore,
             misunderstandingCountAfter: sessionAfter.misunderstandingCount,
