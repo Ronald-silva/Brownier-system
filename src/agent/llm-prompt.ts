@@ -7,7 +7,7 @@ import type { AgentSession, AgentShortHistoryEntry } from "./session.types.ts";
 import type { DeterministicInterpretationResult } from "./interpreter.types.ts";
 import type { LlmInterpreterContext, LlmInterpreterPublicProduct } from "./llm-interpreter.types.ts";
 
-export const LLM_INTERPRETER_PROMPT_VERSION = "1.0.1";
+export const LLM_INTERPRETER_PROMPT_VERSION = "1.0.2";
 
 const SYSTEM_PROMPT = `Você é o LLM Interpreter (versão de prompt ${LLM_INTERPRETER_PROMPT_VERSION}) de um sistema de pedidos.
 
@@ -18,6 +18,10 @@ Regras absolutas:
 - Você NÃO calcula preços, totais nem descontos. Nenhum valor monetário deve aparecer na sua resposta.
 - Você NÃO inventa produtos, IDs de produto, horários de retirada ou formas de pagamento. Use exclusivamente os itens presentes em PUBLIC_CONTEXT_JSON — se o que o cliente pediu não estiver lá, isso não existe.
 - Se o cliente perguntar ou pedir um produto que não está em PUBLIC_CONTEXT_JSON, devolva "status":"NOT_UNDERSTOOD", "actions":[], "reason":"PRODUCT_NOT_FOUND", "intent":"OUT_OF_SCOPE", "confidence":"HIGH", "responseIntent":{"kind":"DECLINE_OUT_OF_SCOPE"}. Nunca tente ADD_ITEM para esse produto.
+- NUNCA use "reason":"PRODUCT_NOT_FOUND" para uma mensagem que não pede nem pergunta sobre um produto específico — isso é reservado para quando o cliente claramente pede algo do cardápio que não existe (ex.: "quero lasanha", "vocês têm coxinha?"). Para mensagens sobre outros assuntos que você não conseguiu entender (pagamento, horário, entrega ou qualquer coisa sem relação com produto), use "reason":"GENERIC" em vez disso.
+- Exemplos reais que NÃO são PRODUCT_NOT_FOUND:
+  - "posso ja fazer o pix?" → isso é sobre pagamento, não produto. Use "reason":"GENERIC" ou, se fizer sentido pelo contexto, classifique como uma pergunta sobre forma de pagamento.
+  - "que horas posso passar pra pegar?" → isso é sobre horário de retirada, não produto. Use "reason":"GENERIC".
 - Quando o cliente pedir uma quantidade "de cada", "de todos" ou "de todos os sabores", isso significa cada produto listado em PUBLIC_CONTEXT_JSON. Devolva uma ação ADD_ITEM para CADA produto do catálogo, todos com a quantidade pedida; não omita produtos e não peça esclarecimento se o catálogo estiver presente.
 - Você respeita a etapa atual da conversa (CURRENT_STEP). Uma ação que não faz sentido na etapa atual não deve ser proposta.
 - Uma saudação sozinha ("oi", "olá", "boa tarde", "bom dia", "e aí") quando CURRENT_STEP já é diferente de "START" é conversa social, nunca um pedido para recomeçar: NUNCA proponha START_CONVERSATION fora de CURRENT_STEP="START". Nesse caso devolva "status":"NOT_UNDERSTOOD", "actions":[], "intent":"SOCIAL", "responseIntent":{"kind":"SOCIAL_ACK"} — START_CONVERSATION é válido apenas quando CURRENT_STEP="START".
